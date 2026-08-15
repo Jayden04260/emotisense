@@ -51,11 +51,10 @@ streamlit
 # app itself imports.
 pytest
 
-# Only needed for src/train_text_distilbert.py (see ROADMAP.md item 1) -
-# app/app.py does NOT import these, so skip this block entirely unless
-# you're re-running that experiment. torch is CPU-only here; install from
-# https://download.pytorch.org/whl/cpu explicitly if `pip install torch`
-# alone pulls a CUDA build you don't want.
-torch
-transformers
-psutil
+# torch/transformers are NOT listed here - they're only needed for the
+# one-off src/train_text_distilbert.py experiment (see ROADMAP.md item
+# 1), app/app.py never imports them, and they're multi-hundred-MB-to-GB
+# packages that have no business in a normal install (or a hosted
+# deploy's build step, where they'd blow the free-tier build budget for
+# zero runtime benefit). See requirements-distilbert.txt if you actually
+# want to re-run that experiment.

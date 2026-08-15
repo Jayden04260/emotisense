@@ -1,0 +1,14 @@
+# Extra dependencies for the one-off src/train_text_distilbert.py
+# experiment (see ROADMAP.md item 1) - NOT needed to run app/app.py or
+# anything else in this project, and deliberately kept out of the main
+# requirements.txt so a normal install (or a hosted deploy) doesn't pull
+# these multi-hundred-MB-to-GB packages for no runtime benefit.
+#
+# Install with:
+#   pip install -r requirements-distilbert.txt
+#
+# torch is CPU-only by default here; if `pip install torch` alone pulls a
+# CUDA build you don't want, install explicitly from
+# https://download.pytorch.org/whl/cpu instead.
+torch
+transformers

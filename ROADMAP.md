@@ -55,8 +55,10 @@ and heavier dependencies (`torch`, `torchaudio`, `transformers`) than the
 text half.
 
 **Effort:** Medium (text) / High (audio). **Blockers:** needs `torch` +
-`transformers` installed on your machine (not installable in this sandbox
-- no pypi access here - but that's a non-issue on your own machine).
+`transformers` installed on your machine (`pip install -r
+requirements-distilbert.txt` - kept out of the main requirements.txt
+since app/app.py never imports them; not installable in this sandbox -
+no pypi access here - but that's a non-issue on your own machine).
 GPU isn't required for the text half but would make iteration much faster;
 CPU-only fine-tuning of DistilBERT on 16k sentences is feasible but slow
 (expect it to take a while per epoch).
