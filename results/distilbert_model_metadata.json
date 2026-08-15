@@ -1,0 +1,22 @@
+{
+    "model": "distilbert-base-uncased (fine-tuned)",
+    "subset_size": 3000,
+    "full_train_size": 16000,
+    "test_size": 2000,
+    "epochs": 2,
+    "batch_size": 8,
+    "max_length": 64,
+    "learning_rate": 2e-05,
+    "class_weighted_loss": true,
+    "accuracy": 0.89,
+    "f1_macro": 0.8510634969671386,
+    "train_time_seconds": 2320.466845300005,
+    "labels": [
+        "anger",
+        "fear",
+        "joy",
+        "love",
+        "sadness",
+        "surprise"
+    ]
+}

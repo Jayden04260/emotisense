@@ -1,0 +1,77 @@
+# Secrets - never commit real Spotify credentials (or anything else that
+# lands in this file). Only secrets.toml.example, which has no real
+# values, is meant to be tracked.
+.streamlit/secrets.toml
+
+# Your personal Spotify login tokens (access/refresh token pair) written
+# by the "My Spotify" tab's OAuth flow - as sensitive as a password, never
+# commit this.
+.streamlit/spotify_user_tokens.json
+
+# Virtual environment
+venv/
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# Generated at runtime, not project source
+results/prediction_history.csv
+
+# Trained model artefacts - regenerable via src/train_*.py and
+# src/compare_*.py (see README "Training Models" / "Model Comparison"),
+# and several of these are far too large for a normal git repo -
+# results/distilbert_emotion_model/model.safetensors alone is ~268MB,
+# well past GitHub's 100MB hard per-file limit. Reports/tables/charts
+# (.csv/.md/.png/.txt/.json under results/) are kept - those are the
+# actual evidence of the ML work and are small - only the binary model
+# weights themselves are excluded, EXCEPT the 3 current production
+# models (emotion_model.pkl, vectorizer.pkl, audio_emotion_model.pkl -
+# see the !results/... exceptions below), which are kept despite being
+# binary: without them app.py can't run at all on a fresh clone or a
+# hosted deploy, and at ~1.1MB/0.05MB/12.5MB they're small enough that
+# there's no real reason to force a training run just to get a working
+# app. The .bak rollback copies and the models_comparison/ "zoo" of
+# every alternative tried are still excluded - useful locally, not
+# needed for the app to function.
+results/*.pkl
+results/*.pkl.bak
+results/*.pkl.*.bak
+results/models/*.pkl
+results/models_comparison/*.pkl
+results/distilbert_emotion_model/
+results/temp_recording.wav
+!results/emotion_model.pkl
+!results/vectorizer.pkl
+!results/audio_emotion_model.pkl
+
+# Third-party datasets - not this project's to redistribute (RAVDESS and
+# CREMA-D both carry their own research-use licenses; the text dataset's
+# redistribution terms aren't fully verified either), and the audio set
+# in particular is thousands of files. See README "Dataset Requirements"
+# for where to download each one - data/music.csv and
+# data/afinn_sentiment_lexicon.txt are the exceptions, kept in git since
+# they're this project's own curated output / a permissively-licensed
+# (Apache-2.0) lexicon small enough to just include.
+data/audio/
+data/raw/
+data/processed/
+
+# Claude Code's local tool-permission config and test cache - machine-
+# specific, not project source.
+.claude/
+.pytest_cache/
+
+# Personal/dissertation artefacts, not meant for a public repo.
+Notes.docx
+EmotionProjectPresentation.pptx
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Microsoft Office lock files (created while a .docx/.pptx/.xlsx is open
+# elsewhere) - transient, not project content.
+~$*

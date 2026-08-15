@@ -1,0 +1,22 @@
+Accuracy: 0.4968
+
+Class distribution:
+angry: 1463
+fear: 1463
+happy: 1463
+neutral: 1183
+sad: 1463
+
+Feature dimension: 54
+
+              precision    recall  f1-score   support
+
+       angry       0.59      0.68      0.63       292
+        fear       0.41      0.26      0.32       292
+       happy       0.44      0.47      0.45       292
+     neutral       0.45      0.45      0.45       235
+         sad       0.54      0.62      0.58       292
+
+    accuracy                           0.50      1403
+   macro avg       0.49      0.50      0.49      1403
+weighted avg       0.49      0.50      0.49      1403

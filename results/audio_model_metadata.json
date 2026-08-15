@@ -1,0 +1,33 @@
+{
+    "num_samples": 7035,
+    "num_train_samples": 5632,
+    "num_test_samples": 1403,
+    "accuracy": 0.49679258731290094,
+    "classes": [
+        "angry",
+        "fear",
+        "happy",
+        "neutral",
+        "sad"
+    ],
+    "class_distribution": {
+        "angry": 1463,
+        "fear": 1463,
+        "happy": 1463,
+        "neutral": 1183,
+        "sad": 1463
+    },
+    "feature_dimension": 54,
+    "feature_description": "40 MFCC mean + ZCR mean + chroma mean + RMS mean",
+    "preprocessing": {
+        "sample_rate": 22050,
+        "max_duration_seconds": 5,
+        "trim_silence": true,
+        "normalize_audio": true,
+        "fixed_length_padding": true,
+        "scaling": "StandardScaler"
+    },
+    "model": "Pipeline(StandardScaler + SVC(kernel='linear', probability=True, class_weight='balanced'))",
+    "split_method": "StratifiedGroupKFold(n_splits=5) grouped by actor - no speaker leakage between train/test",
+    "leaked_actors_between_train_test": 0
+}

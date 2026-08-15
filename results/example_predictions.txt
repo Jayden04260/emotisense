@@ -1,0 +1,16 @@
+Input: i feel amazing today
+Predicted emotion: joy
+Recommended song: Good as Hell - Lizzo
+
+Input: i am really upset
+Predicted emotion: sadness
+Recommended song: Someone Like You - Adele
+
+Input: i am scared right now
+Predicted emotion: fear
+Recommended song: Boulevard of Broken Dreams - Green Day
+
+Input: i love this so much
+Predicted emotion: joy
+Recommended song: Good as Hell - Lizzo
+

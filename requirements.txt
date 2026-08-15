@@ -1,0 +1,61 @@
+audioop-lts==0.2.2; python_version >= "3.13"
+audioread==3.1.0
+certifi==2026.2.25
+cffi==2.0.0
+charset-normalizer==3.4.7
+contourpy==1.3.3
+cycler==0.12.1
+decorator==5.2.1
+fonttools==4.62.1
+idna==3.11
+joblib==1.5.3
+kiwisolver==1.5.0
+lazy-loader==0.5
+librosa==0.11.0
+llvmlite==0.47.0
+matplotlib==3.10.8
+msgpack==1.1.2
+numba==0.65.0
+numpy==2.4.4
+packaging==26.0
+pandas==3.0.2
+pillow==12.2.0
+platformdirs==4.9.6
+pooch==1.9.0
+pycparser==3.0
+pyparsing==3.3.2
+python-dateutil==2.9.0.post0
+requests==2.33.1
+scikit-learn==1.8.0
+scipy==1.17.1
+six==1.17.0
+sounddevice==0.5.5
+soundfile==0.13.1
+soxr==1.0.0
+standard-aifc==3.13.0; python_version >= "3.13"
+standard-chunk==3.13.0; python_version >= "3.13"
+standard-sunau==3.13.0; python_version >= "3.13"
+threadpoolctl==3.6.0
+typing_extensions==4.15.0
+tzdata==2026.1
+urllib3==2.6.3
+
+# Added for the EmotiSense Streamlit app (app/app.py). Left unpinned so pip
+# resolves a current, mutually-compatible version along with its own
+# sub-dependencies (altair, pydeck, tornado, etc.) - pin it yourself with
+# `pip freeze` once you've settled on a version you like.
+streamlit
+
+# Added for the automated test suite (tests/) - see README "Robustness
+# Testing". Also left unpinned; it's a dev-time tool, not something the
+# app itself imports.
+pytest
+
+# Only needed for src/train_text_distilbert.py (see ROADMAP.md item 1) -
+# app/app.py does NOT import these, so skip this block entirely unless
+# you're re-running that experiment. torch is CPU-only here; install from
+# https://download.pytorch.org/whl/cpu explicitly if `pip install torch`
+# alone pulls a CUDA build you don't want.
+torch
+transformers
+psutil
