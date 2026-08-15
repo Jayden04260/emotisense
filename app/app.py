@@ -882,7 +882,13 @@ with tab_audio:
                 st.session_state["last_recording"] = tmp.name
                 st.success("Recording captured.")
             except Exception as e:
-                st.error(f"Microphone error: {e}")
+                st.error(
+                    f"Couldn't access a microphone ({e}). If this app is "
+                    "running on a hosted server, that's expected - there's "
+                    "no physical mic for it to use. Try uploading a WAV "
+                    "file instead, or run the app locally to record with "
+                    "your own microphone."
+                )
 
         if st.session_state.get("last_recording"):
             audio_path = st.session_state["last_recording"]
@@ -1015,7 +1021,13 @@ with tab_multimodal:
                 st.session_state["mm_last_recording"] = tmp.name
                 st.success("Recording captured.")
             except Exception as e:
-                st.error(f"Microphone error: {e}")
+                st.error(
+                    f"Couldn't access a microphone ({e}). If this app is "
+                    "running on a hosted server, that's expected - there's "
+                    "no physical mic for it to use. Try uploading a WAV "
+                    "file instead, or run the app locally to record with "
+                    "your own microphone."
+                )
 
         if st.session_state.get("mm_last_recording"):
             mm_audio_path = st.session_state["mm_last_recording"]
