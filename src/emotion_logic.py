@@ -22,7 +22,7 @@ import numpy as np
 # Real test-set accuracies (see README "Model Comparison") - used to weight
 # each modality's contribution when fusing predictions in fuse_predictions().
 # --------------------------------------------------------------------------
-TEXT_MODEL_ACCURACY = 0.892
+TEXT_MODEL_ACCURACY = 0.895
 AUDIO_MODEL_ACCURACY = 0.528
 TEXT_FUSION_WEIGHT = TEXT_MODEL_ACCURACY / (TEXT_MODEL_ACCURACY + AUDIO_MODEL_ACCURACY)
 AUDIO_FUSION_WEIGHT = 1 - TEXT_FUSION_WEIGHT

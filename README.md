@@ -425,14 +425,18 @@ philosophy for the general idea):
 
 | Model | Accuracy | F1 Score (macro) | Training Time (s) |
 |---|---|---|---|
-| Linear SVM (now in production, calibrated) | 89.2% | 83.9% | 2.03 |
-| Logistic Regression (original baseline) | 86.9% | 80.6% | 1.12 |
-| Gradient Boosting | 86.0% | 83.1% | 48.34 |
-| Random Forest | 85.9% | 81.3% | 6.37 |
-| Naive Bayes | 71.6% | 48.2% | 0.02 |
+| Linear SVM (now in production, calibrated) | 89.5% | 84.2% | 1.78 |
+| Logistic Regression (original baseline) | 86.9% | 80.7% | 0.72 |
+| Gradient Boosting | 86.0% | 82.8% | 43.96 |
+| Random Forest | 85.8% | 81.3% | 5.67 |
+| Naive Bayes | 71.8% | 48.6% | 0.01 |
 
 Linear SVM beat the original Logistic Regression baseline on both accuracy
-and F1, so it's now the model `app/app.py` actually serves.
+and F1, so it's now the model `app/app.py` actually serves. Numbers above
+were refreshed after adding more training examples for underrepresented
+anger-adjacent words ("frustrating", "annoying", "irritating",
+"infuriating", "aggravating", "exasperating", "maddening") that the model
+had previously been misreading as joy - see `data/raw/train.txt`.
 
 ## Audio models
 
