@@ -4,6 +4,39 @@
 (free-tier hosting - the app sleeps after inactivity, so the first load
 after a while can take up to a minute to wake back up)
 
+## Highlights
+
+- **Found and fixed a real data leakage bug:** an audit of the audio
+  model's train/test split found 100% of test-set actors also appeared
+  in training - not a partial leak, every single one. Fixing it (grouped,
+  actor-aware splitting) changed which model actually won the comparison,
+  not just the accuracy number. See [Fairness & Generalisation
+  Audit](#fairness--generalisation-audit).
+- **Model choice is backed by a real benchmark, not a guess:** five
+  classical models compared on identical features, with the winner
+  properly calibrated so its confidence scores are real probabilities,
+  not silently-fake 100%/0% one-hot values. See [Model
+  Comparison](#model-comparison).
+- **Diagnosed and fixed a systematic mislabeling pattern** - a cluster of
+  anger words the model was reading as joy - by comparing word frequency
+  in misclassified vs. correctly-classified examples, verified the fix on
+  held-out data, and **wrote up a second attempt at the same technique
+  that didn't work**, with a hypothesis for why. Real accuracy numbers,
+  real dead ends, not just a headline metric. See
+  [ROADMAP.md](ROADMAP.md).
+- **Adversarially tested, not just accuracy-tested:** ran both production
+  models against sarcasm, negation, gibberish, and synthetic non-speech
+  audio, and reported the genuine blind spots that turned up (TF-IDF
+  can't represent negation) instead of only the numbers that looked
+  good. See [Adversarial Input Exploration](#adversarial-input-exploration).
+- **Deployed and kept honest in production:** live on Streamlit Community
+  Cloud with a real Spotify OAuth integration - including a stale-model
+  caching bug caught and fixed after a redeploy silently kept serving an
+  old model in memory.
+- 75 automated tests, full CI-style reproducibility (every reported
+  number comes from a script you can re-run), and this README documents
+  the failed experiments alongside the ones that worked.
+
 ## Overview
 
 The Emotion Detection System is a multimodal machine learning project developed in Python that detects human emotions from both **text input** and **audio input**.
