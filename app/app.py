@@ -176,15 +176,30 @@ BRAND_TAGLINE = "Multimodal emotion detection & mood-aware music recommendation"
 # --------------------------------------------------------------------------
 
 @st.cache_resource(show_spinner=False)
-def load_text_pipeline():
+def _load_text_pipeline_cached(model_mtime: float, vectorizer_mtime: float):
     model = joblib.load(TEXT_MODEL_PATH)
     vectorizer = joblib.load(VECTORIZER_PATH)
     return model, vectorizer
 
 
+def load_text_pipeline():
+    # st.cache_resource keys on the function's arguments, not on the
+    # target files' contents - a retrained model.pkl with the exact same
+    # path would otherwise keep serving the old in-memory object after a
+    # code-only redeploy (Streamlit Cloud reruns the script but doesn't
+    # always restart the process), until someone notices and manually
+    # reboots the app. Passing each file's mtime busts the cache whenever
+    # the file on disk actually changes.
+    return _load_text_pipeline_cached(TEXT_MODEL_PATH.stat().st_mtime, VECTORIZER_PATH.stat().st_mtime)
+
+
 @st.cache_resource(show_spinner=False)
-def load_audio_model():
+def _load_audio_model_cached(model_mtime: float):
     return joblib.load(AUDIO_MODEL_PATH)
+
+
+def load_audio_model():
+    return _load_audio_model_cached(AUDIO_MODEL_PATH.stat().st_mtime)
 
 
 @st.cache_data(show_spinner=False)
