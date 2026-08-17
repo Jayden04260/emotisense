@@ -179,6 +179,45 @@ into something concrete, and it's a direct continuation of Phase 6's
 robustness work rather than a new subsystem - could realistically be
 "Phase 6.5" before touching any models.
 
+**Word-level blind-spot audit (2026-08-17):** Following the same method
+that found the "frustrating"-family anger words being misread as joy
+(comparing word frequency in misclassified vs. correctly-classified
+examples of the same true class, on val + test), two more candidates
+turned up, both consistent across val and test:
+
+- `strange`/`weird` driving bidirectional fear↔surprise confusion -
+  `surprise -> fear` was the model's second-highest per-class error rate
+  (16.7% of test), right behind `love -> joy`
+- `stressed`/`hated` driving bidirectional anger↔sadness confusion, same
+  shape as the original fix
+
+**Attempted fix did not hold up.** Added ~5-6 new training examples per
+word/class gap (22 total) using the exact same recipe as the
+`frustrating` fix, retrained, re-measured the same four confusion pairs
+on held-out test data: `surprise -> fear` moved slightly (16.7% -> 15.2%),
+but `fear -> surprise` and `anger -> sadness` got marginally *worse*
+(4.5% -> 4.9%, 4.7% -> 5.1%), and `sadness -> anger` didn't move at all
+(2.9% -> 2.9%). Reverted rather than promoting a change that doesn't
+demonstrably help - `results/emotion_model.pkl` and `data/raw/train.txt`
+are both back to their pre-attempt state.
+
+**Why this one likely didn't work when `frustrating` did:** 22 examples
+against a ~16k-row dataset (~0.14%) may simply be too small a signal for
+a linear model's decision boundary to pick up in a way that generalises
+to held-out data. It's also plausible these particular words reflect
+genuine contextual ambiguity ("a strange feeling" really can go either
+way) rather than a clean labelling-frequency imbalance like `frustrating`
+was. Worth knowing before assuming this recipe (spot a skewed word, add
+a handful of counter-examples) generalises to every blind spot found this
+way - it fixed one real case, not two.
+
+**Suggested next step if picked back up:** a meaningfully larger batch
+(15-20 examples per word/class gap instead of 5-6) would be a fairer test
+of whether more data helps here, or accept that fear/surprise and
+anger/sadness sit closer to genuine class-boundary ambiguity - similar to
+the `joy`/`love` confusion, which is this model's single largest error
+and wasn't attempted here for exactly that reason.
+
 ---
 
 ## 4. Jointly-trained multimodal model
