@@ -1,5 +1,9 @@
 # Emotion Detection System 🎯
 
+**Live demo:** [jaydens-emotisense.streamlit.app](https://jaydens-emotisense.streamlit.app/)
+(free-tier hosting - the app sleeps after inactivity, so the first load
+after a while can take up to a minute to wake back up)
+
 ## Overview
 
 The Emotion Detection System is a multimodal machine learning project developed in Python that detects human emotions from both **text input** and **audio input**.
