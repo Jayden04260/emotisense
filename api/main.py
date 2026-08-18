@@ -68,8 +68,15 @@ def _load_model():
     # low_cpu_mem_usage avoids transformers creating a full duplicate copy of
     # the model's weights in memory while loading (its default behaviour) -
     # first deploy attempt on Render's free tier (512MB RAM) was killed with
-    # exit 137 (SIGKILL/OOM) during startup, before this was set.
-    _model = DistilBertForSequenceClassification.from_pretrained(source, low_cpu_mem_usage=True)
+    # exit 137 (SIGKILL/OOM) during startup, before this was set. That alone
+    # still wasn't enough (second attempt also hit exit 137, this time during
+    # the Hub download/load) - loading straight into float16 halves the
+    # ~268MB fp32 weight footprint on top of that. CPU inference in fp16 is
+    # slower than fp32 per-op, but this model is tiny (67M params) and
+    # requests aren't latency-sensitive here, so the memory saving wins.
+    _model = DistilBertForSequenceClassification.from_pretrained(
+        source, low_cpu_mem_usage=True, torch_dtype=torch.float16
+    )
     _model.eval()
     _label_names = [_model.config.id2label[i] for i in range(_model.config.num_labels)]
 
