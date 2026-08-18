@@ -471,6 +471,50 @@ anger-adjacent words ("frustrating", "annoying", "irritating",
 "infuriating", "aggravating", "exasperating", "maddening") that the model
 had previously been misreading as joy - see `data/raw/train.txt`.
 
+## Deployed DistilBERT API
+
+The fine-tuned DistilBERT text model from ROADMAP.md item 1 - a
+comparison point, not the production model `app/app.py` serves - is
+wrapped as a small FastAPI service (`api/main.py`) and deployed, so it's
+something actually served over HTTP, not just runnable locally:
+
+```bash
+curl -X POST https://<deployment-url>/predict \
+  -H "Content-Type: application/json" \
+  -d '{"text": "I am not happy at all"}'
+```
+
+```json
+{
+  "label": "joy",
+  "confidence": 0.961,
+  "probabilities": {"anger": 0.010, "fear": 0.002, "joy": 0.961, "love": 0.014, "sadness": 0.007, "surprise": 0.005},
+  "warning": "\"not ... happy\" negates a positive-scored word (AFINN score +3). Testing has shown this fine-tuned DistilBERT model still doesn't reliably represent that flip (see ROADMAP.md item 1) despite being a contextual transformer, not a bag-of-words model - so this confident-looking read (96% Joy) may well have the sentiment backwards. Take it with real caution."
+}
+```
+
+That `warning` field is doing real work, not decoration - it reuses
+`emotion_logic.py`'s own negation-detection lexicon (the exact signal
+that flags this failure mode for the production Linear SVM too), with
+wording corrected specifically for this model: the original message
+says "the text model is bag-of-words," true of TF-IDF but false for a
+transformer - DistilBERT just has the same *practical* blind spot for a
+different reason (see ROADMAP.md item 1's v1/v2/v3 write-ups), and the
+API says so honestly rather than reusing an inaccurate explanation.
+
+Run locally:
+
+```bash
+pip install -r requirements.txt -r requirements-api.txt
+uvicorn api.main:app --reload
+```
+
+`MODEL_SOURCE=local` (default) loads `results/distilbert_emotion_model/`
+directly; set it to a Hugging Face Hub repo id to load from there
+instead (what the deployed instance actually does, since that ~268MB
+model directory is gitignored - see `.gitignore`'s "Trained model
+artefacts" comment - and can't ship inside the deployed container).
+
 ## Audio models
 
 Real results from this project's combined audio dataset - RAVDESS plus

@@ -1,0 +1,14 @@
+# Extra dependencies for api/main.py and its tests (tests/test_api.py) -
+# NOT needed for app/app.py or anything else in this project, kept
+# separate from requirements.txt for the same reason
+# requirements-distilbert.txt is: no reason to make a normal install (or
+# the Streamlit app's own deploy) pull in torch/transformers/fastapi for
+# no benefit.
+#
+# Install with:
+#   pip install -r requirements.txt -r requirements-api.txt
+torch
+transformers
+fastapi
+uvicorn
+httpx
