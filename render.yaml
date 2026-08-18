@@ -17,4 +17,4 @@ services:
     startCommand: "uvicorn api.main:app --host 0.0.0.0 --port $PORT"
     envVars:
       - key: MODEL_SOURCE
-        value: your-hf-username/emotisense-distilbert # replace after running the push script
+        value: Jayden04260/emotisense-distilbert
