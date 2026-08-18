@@ -1,0 +1,7 @@
+Negation probe results (v2, negation-oversampled)
+
+Negation               'I am not happy at all'                       -> joy        ( 93.6%)
+Negation (inverse)     'I am not sad'                                -> sadness    ( 90.2%)
+Double negative        "I wouldn't say I'm not pleased"              -> joy        ( 72.2%)
+
+v1 (plain stratified subset, no oversampling) results: "I am not happy at all" -> joy (96.1%); "I am not sad" -> sadness (87.7%). See ROADMAP.md item 1 for the full v1 write-up.

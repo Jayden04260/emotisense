@@ -102,6 +102,37 @@ more epochs, the full 16k rows, or deliberately oversampling
 negation-containing examples would be the natural next things to try
 before concluding transformers can't help here at all.
 
+**v2 attempt (2026-08-18): deliberately oversampling negation examples -
+did not fix it either.** Tested the first of the three suggested next
+steps above. `src/train_text_distilbert.py` now builds the training
+subset via `build_negation_oversampled_subset` (see that function and
+`NEGATION_OVERSAMPLE_FRACTION`): negation-containing rows went from
+their natural 11.8% rate to 35% of the 3,000-row subset - roughly
+tripled representation, same subset size/epochs/batch size as v1 for a
+clean single-variable comparison.
+
+Result: accuracy **87.7%** / F1 macro **84.0%**, both *worse* than v1
+(89.0% / 85.1%) - tripling negation exposure cost some diversity
+elsewhere in a fixed-size subset. And the actual target didn't move:
+re-running the exact same two probes against the new model, "I am not
+happy at all" still scored Joy (93.6%, barely down from v1's 96.1%),
+and "I am not sad" still scored Sadness (90.2%, if anything *more*
+confident than v1's 87.7%). `results/distilbert_v2_negation_attempt/`
+has the full report/metadata/probe output for this run;
+`results/distilbert_emotion_model/` and the top-level
+`results/distilbert_*` files were reverted back to v1 (the strictly
+better result on every measured axis) after this test.
+
+**Conclusion so far:** neither the base fine-tune nor 3x negation
+oversampling teaches this model "not + positive-word = negative" on a
+3,000-row subset in 2 epochs. The full 16k rows or more epochs remain
+untested and are still plausible next steps (more data/exposure rather
+than more oversampling of the same limited pool) - but two different
+approaches have now failed to fix this specific failure mode, which is
+itself evidence worth having: the negation gap looks like it needs more
+training signal in general, not a smarter sampling trick over the same
+small pool.
+
 ---
 
 ## 2. Larger, more real-world datasets

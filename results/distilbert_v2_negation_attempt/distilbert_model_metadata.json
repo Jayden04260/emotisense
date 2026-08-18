@@ -1,0 +1,23 @@
+{
+    "model": "distilbert-base-uncased (fine-tuned, v2 negation-oversampled)",
+    "subset_size": 3000,
+    "full_train_size": 16048,
+    "test_size": 2000,
+    "epochs": 2,
+    "batch_size": 8,
+    "max_length": 64,
+    "learning_rate": 2e-05,
+    "class_weighted_loss": true,
+    "negation_oversample_fraction": 0.35,
+    "accuracy": 0.877,
+    "f1_macro": 0.8399109110999481,
+    "train_time_seconds": 2431.049734899978,
+    "labels": [
+        "anger",
+        "fear",
+        "joy",
+        "love",
+        "sadness",
+        "surprise"
+    ]
+}

@@ -41,7 +41,12 @@ results/*.pkl.*.bak
 results/models/*.pkl
 results/models_comparison/*.pkl
 results/distilbert_emotion_model/
+results/distilbert_v1_backup/
 results/temp_recording.wav
+
+# v2_negation_attempt keeps only small text/json evidence (report, metadata,
+# probe results) - no model weights ever got copied in there, nothing to
+# ignore, but listed here for clarity alongside the other distilbert entries.
 !results/emotion_model.pkl
 !results/vectorizer.pkl
 !results/audio_emotion_model.pkl
