@@ -27,6 +27,22 @@ containing rows in the training subset (natural rate in the full
 that pattern's exposure to chance stratified sampling. run_negation_probe
 below tests the exact sentences that failed before, so "did this work"
 is answered directly rather than inferred from overall accuracy moving.
+v2 also did not fix it (see ROADMAP.md - "v2 attempt").
+
+v3 (2026-08-18): different lever - v1/v2 both only ever trained the
+classification head; v3 adds an auxiliary contrastive loss so the
+model's own sentence embeddings are pushed to actually separate a
+sentence from its negated counterpart, not just relies on cross-entropy
+over an unaware bag of examples. build_contrastive_pairs constructs
+(original, negated) pairs by inserting "not" before the first AFINN-
+scored word in negation-free training sentences (reusing
+emotion_logic's own lexicon/tokenizer - the exact same signal
+confidence_warning already uses to flag this failure mode), and
+CosineEmbeddingLoss(target=-1) pulls their [CLS] embeddings apart during
+training, alongside (not instead of) the normal classification loss on
+real labels. Back to a plain stratified subset (not v2's oversampling)
+so this test isolates the contrastive objective as the only new
+variable versus v1.
 
 Run from the project root with:
 
@@ -46,6 +62,8 @@ from sklearn.metrics import accuracy_score, classification_report, f1_score
 from sklearn.model_selection import train_test_split
 from sklearn.utils.class_weight import compute_class_weight
 from transformers import DistilBertForSequenceClassification, DistilBertTokenizerFast
+
+from emotion_logic import _load_afinn_lexicon, _tokenize_words, detect_negated_sentiment
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
@@ -79,6 +97,14 @@ NEGATION_PROBES = [
     ("Double negative", "I wouldn't say I'm not pleased"),
 ]
 LEARNING_RATE = 2e-5
+
+# Weight on the auxiliary contrastive loss relative to the primary
+# classification cross-entropy - kept well below 1.0 so the model
+# still learns to classify correctly first; the contrastive term is a
+# nudge on the embedding geometry, not the main objective.
+CONTRASTIVE_WEIGHT = 0.5
+CONTRASTIVE_BATCH_SIZE = 8
+MAX_CONTRASTIVE_PAIRS = 1500  # caps pair-generation/training time; see build_contrastive_pairs
 
 
 def load_data(path):
@@ -155,6 +181,85 @@ def build_negation_oversampled_subset(texts, labels, subset_size, oversample_fra
     return combined_texts, combined_labels
 
 
+def _insert_negation(text, word):
+    """Inserts "not " immediately before the first whole-word, case-
+    insensitive occurrence of `word` in `text`. Simple string insertion,
+    not grammatically validated (e.g. "not happy" is fine; "not love" reads
+    a little awkwardly for a verb) - acceptable here since the pair is only
+    ever used for the contrastive embedding-distance loss, not shown to a
+    human or given its own classification label."""
+    match = re.search(r"\b" + re.escape(word) + r"\b", text, re.IGNORECASE)
+    if not match:
+        return None
+    return text[: match.start()] + "not " + text[match.start() :]
+
+
+def build_contrastive_pairs(texts, max_pairs=MAX_CONTRASTIVE_PAIRS, seed=42):
+    """
+    Builds (original, negated) sentence pairs for the auxiliary
+    contrastive loss - see module docstring ("v3"). Only draws from
+    sentences that don't already contain a negation cue (detect_negated_
+    sentiment reuses the exact lexicon/window logic emotion_logic.py's
+    confidence_warning already relies on), and only where an AFINN-scored
+    word exists to negate. No label is assigned to the synthetic negated
+    sentence - the contrastive loss only needs the two embeddings to be
+    pushed apart, not a ground-truth class for the new one.
+
+    detect_negated_sentiment alone isn't a strict enough filter here: it
+    only flags a negation cue immediately (within NEGATION_WORD_WINDOW)
+    before an AFINN-scored word, so a sentence like "...anxious, not sure
+    what to do..." passes it (nothing scored follows "not" closely enough)
+    even though it already contains a negation elsewhere - inserting a
+    second "not" before a different scored word then produces a
+    confusingly double-negated example. NEGATION_RE (any negation word
+    anywhere) is the stricter, additional filter for this specific use.
+    """
+    lexicon = _load_afinn_lexicon()
+    pairs = []
+    for text in texts:
+        if detect_negated_sentiment(text) is not None or NEGATION_RE.search(text):
+            continue  # already has a negation cue - not what this pair is for
+        tokens = _tokenize_words(text)
+        scored_word = next((t for t in tokens if t in lexicon), None)
+        if scored_word is None:
+            continue
+        negated = _insert_negation(text, scored_word)
+        if negated is not None:
+            pairs.append((text, negated))
+        if len(pairs) >= max_pairs:
+            break
+
+    rng = np.random.RandomState(seed)
+    rng.shuffle(pairs)
+    print(f"Built {len(pairs)} contrastive (original, negated) pairs")
+    if pairs:
+        print(f"  example: {pairs[0][0]!r} -> {pairs[0][1]!r}")
+    return pairs
+
+
+class ContrastivePairDataset(Dataset):
+    """Tokenizes both halves of each (original, negated) pair so a
+    DataLoader batch yields (original_encoding_batch, negated_encoding_batch)."""
+
+    def __init__(self, pairs, tokenizer, max_length):
+        originals, negated = zip(*pairs) if pairs else ([], [])
+        self.original_encodings = tokenizer(
+            list(originals), truncation=True, padding=True, max_length=max_length, return_tensors="pt"
+        )
+        self.negated_encodings = tokenizer(
+            list(negated), truncation=True, padding=True, max_length=max_length, return_tensors="pt"
+        )
+        self.length = len(pairs)
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        original = {k: v[idx] for k, v in self.original_encodings.items()}
+        negated = {k: v[idx] for k, v in self.negated_encodings.items()}
+        return original, negated
+
+
 def run_negation_probe(model, tokenizer, label_names, device):
     """Runs NEGATION_PROBES through the fine-tuned model directly (not
     the sklearn vectorizer path - see module docstring) and returns a
@@ -184,13 +289,18 @@ def main():
     label_to_id = {l: i for i, l in enumerate(label_names)}
     print(f"Labels: {label_names}")
 
-    # Negation-oversampled subset of the training set - see module
-    # docstring ("v2") for why this replaced a plain stratified sample.
-    train_texts, train_labels_str = build_negation_oversampled_subset(
-        train_texts_full, train_labels_full, SUBSET_SIZE, NEGATION_OVERSAMPLE_FRACTION
+    # Plain stratified subset (v1's approach, not v2's oversampling) - v3
+    # tests a different lever (contrastive loss, see module docstring), so
+    # this deliberately isolates that as the only new variable vs. v1.
+    subset_frac = SUBSET_SIZE / len(train_texts_full)
+    train_texts, _, train_labels_str, _ = train_test_split(
+        train_texts_full, train_labels_full,
+        train_size=subset_frac, random_state=42, stratify=train_labels_full,
     )
     print(f"Training subset: {len(train_texts)} of {len(train_texts_full)} rows")
     print("Subset class distribution:", dict(sorted(Counter(train_labels_str).items())))
+
+    contrastive_pairs = build_contrastive_pairs(train_texts)
 
     train_labels = [label_to_id[l] for l in train_labels_str]
     test_labels = [label_to_id[l] for l in test_labels_str]
@@ -211,29 +321,62 @@ def main():
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
+    contrastive_dataset = ContrastivePairDataset(contrastive_pairs, tokenizer, MAX_LENGTH)
+    contrastive_loader = DataLoader(contrastive_dataset, batch_size=CONTRASTIVE_BATCH_SIZE, shuffle=True)
+
     print("Loading DistilBERT model...")
     model = DistilBertForSequenceClassification.from_pretrained(
-        "distilbert-base-uncased", num_labels=len(label_names)
+        "distilbert-base-uncased",
+        num_labels=len(label_names),
+        id2label={i: label for i, label in enumerate(label_names)},
+        label2id={label: i for i, label in enumerate(label_names)},
     )
+    # Without id2label/label2id above, from_pretrained defaults to generic
+    # "LABEL_0".."LABEL_5" in the saved config - harmless for this script's
+    # own eval (which indexes by position, not name) but silently wrong for
+    # anything loading the saved model later expecting real emotion names
+    # (see api/main.py, which reads model.config.id2label directly).
     loss_fn = torch.nn.CrossEntropyLoss(weight=class_weights)
+    contrastive_loss_fn = torch.nn.CosineEmbeddingLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
 
     total_steps = len(train_loader) * EPOCHS
     print(f"Training: {EPOCHS} epochs x {len(train_loader)} steps = {total_steps} total steps")
+    print(f"Contrastive pairs: {len(contrastive_dataset)} in {len(contrastive_loader)} batches/epoch (cycled)")
+
+    def cls_embedding(encoding):
+        # model.distilbert is the base encoder DistilBertForSequenceClassification
+        # wraps - [CLS] is always position 0 in DistilBERT's tokenization.
+        return model.distilbert(**encoding).last_hidden_state[:, 0, :]
 
     model.train()
     start = time.perf_counter()
     step = 0
+    contrastive_iter = iter(contrastive_loader)
     for epoch in range(EPOCHS):
         epoch_loss = 0.0
+        epoch_contrastive_loss = 0.0
         for batch in train_loader:
             optimizer.zero_grad()
             labels = batch.pop("labels")
             outputs = model(**batch)
-            loss = loss_fn(outputs.logits, labels)
+            classification_loss = loss_fn(outputs.logits, labels)
+
+            try:
+                original_batch, negated_batch = next(contrastive_iter)
+            except StopIteration:
+                contrastive_iter = iter(contrastive_loader)
+                original_batch, negated_batch = next(contrastive_iter)
+            original_emb = cls_embedding(original_batch)
+            negated_emb = cls_embedding(negated_batch)
+            target = -torch.ones(original_emb.size(0))  # -1 = "these should be dissimilar"
+            contrastive_loss = contrastive_loss_fn(original_emb, negated_emb, target)
+
+            loss = classification_loss + CONTRASTIVE_WEIGHT * contrastive_loss
             loss.backward()
             optimizer.step()
-            epoch_loss += loss.item()
+            epoch_loss += classification_loss.item()
+            epoch_contrastive_loss += contrastive_loss.item()
             step += 1
             if step % 50 == 0 or step == total_steps:
                 elapsed = time.perf_counter() - start
@@ -241,10 +384,14 @@ def main():
                 remaining = rate * (total_steps - step)
                 print(
                     f"  step {step}/{total_steps}  loss={loss.item():.4f}  "
+                    f"(cls={classification_loss.item():.4f} contrastive={contrastive_loss.item():.4f})  "
                     f"elapsed={elapsed / 60:.1f}min  eta={remaining / 60:.1f}min",
                     flush=True,
                 )
-        print(f"Epoch {epoch + 1}/{EPOCHS} done, avg loss={epoch_loss / len(train_loader):.4f}")
+        print(
+            f"Epoch {epoch + 1}/{EPOCHS} done, avg cls loss={epoch_loss / len(train_loader):.4f}  "
+            f"avg contrastive loss={epoch_contrastive_loss / len(train_loader):.4f}"
+        )
 
     train_time = time.perf_counter() - start
     print(f"\nTraining finished in {train_time / 60:.1f} minutes")
@@ -282,15 +429,16 @@ def main():
         probe_lines.append(line)
     probe_lines.append("")
     probe_lines.append(
-        "v1 (plain stratified subset, no oversampling) results: "
+        "v1 (plain stratified subset, no contrastive loss) results: "
         '"I am not happy at all" -> joy (96.1%); "I am not sad" -> sadness (87.7%). '
-        "See ROADMAP.md item 1 for the full v1 write-up."
+        "v2 (negation-oversampled) results: joy (93.6%); sadness (90.2%). "
+        "See ROADMAP.md item 1 for the full v1/v2 write-up."
     )
     with open(NEGATION_PROBE_PATH, "w", encoding="utf-8") as f:
         f.write("\n".join(probe_lines) + "\n")
 
     metadata = {
-        "model": "distilbert-base-uncased (fine-tuned, v2 negation-oversampled)",
+        "model": "distilbert-base-uncased (fine-tuned, v3 contrastive-pairs)",
         "subset_size": len(train_texts),
         "full_train_size": len(train_texts_full),
         "test_size": len(test_texts),
@@ -299,7 +447,8 @@ def main():
         "max_length": MAX_LENGTH,
         "learning_rate": LEARNING_RATE,
         "class_weighted_loss": True,
-        "negation_oversample_fraction": NEGATION_OVERSAMPLE_FRACTION,
+        "contrastive_pairs": len(contrastive_pairs),
+        "contrastive_weight": CONTRASTIVE_WEIGHT,
         "accuracy": float(accuracy),
         "f1_macro": float(f1_macro),
         "train_time_seconds": train_time,

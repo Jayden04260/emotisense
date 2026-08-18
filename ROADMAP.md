@@ -133,6 +133,35 @@ itself evidence worth having: the negation gap looks like it needs more
 training signal in general, not a smarter sampling trick over the same
 small pool.
 
+**v3 attempt (2026-08-18): contrastive pairs - interrupted before
+completion, inconclusive.** Added an auxiliary `CosineEmbeddingLoss`
+pushing each training sentence's [CLS] embedding away from a synthetic
+negated version (built by inserting "not" before the first AFINN-scored
+word in negation-free sentences - `build_contrastive_pairs`), alongside
+the normal classification loss, on the same plain (non-oversampled)
+subset as v1 for a clean single-variable comparison.
+
+Killed partway through training (~step 250/750) to free up memory for
+building the deployment API instead - not enough time budget to let a
+~100-minute run finish (roughly 2.5x slower per step than v1/v2, since
+every step now does two extra embedding forward passes). No accuracy or
+negation probe result exists for this attempt.
+
+Worth recording even incomplete: the contrastive loss term hit exactly
+0.0000 by step ~100-150 and stayed there, suggesting the embeddings
+separated almost immediately (plausibly because DistilBERT's *pretrained*
+embeddings already distinguish "happy" from "not happy" reasonably well,
+before any fine-tuning). That's a real design gap worth flagging before
+anyone picks this back up: pushing embeddings apart doesn't by itself
+teach the *classification head* which label a negated example should
+get, since no target label was ever assigned to the synthetic negated
+sentences - only "be different," not "be different in this direction."
+Zero contrastive loss for ~600 of 750 steps means that gap likely
+wouldn't have resolved even with a full run. A version that assigns an
+explicit (even coarse - "not [positive]" -> negative-direction) target
+label to the negated examples would close that gap and is the more
+promising next attempt, not a straight re-run of this one.
+
 ---
 
 ## 2. Larger, more real-world datasets
