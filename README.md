@@ -33,6 +33,14 @@ after a while can take up to a minute to wake back up)
   Cloud with a real Spotify OAuth integration - including a stale-model
   caching bug caught and fixed after a redeploy silently kept serving an
   old model in memory.
+- **A second, independent deployment of the fine-tuned PyTorch model
+  itself:** the DistilBERT model from ROADMAP.md item 1 is served over
+  HTTP as its own FastAPI service, not just the Streamlit app - see
+  [Deployed DistilBERT API](#deployed-distilbert-api). Getting it onto
+  Render's free tier meant diagnosing two separate out-of-memory crashes
+  (`exit 137`) and fixing the actual cause (an oversized fp32 download,
+  not just an oversized in-memory model), not just throwing more RAM at
+  it.
 - 75 automated tests, full CI-style reproducibility (every reported
   number comes from a script you can re-run), and this README documents
   the failed experiments alongside the ones that worked.
@@ -479,10 +487,14 @@ wrapped as a small FastAPI service (`api/main.py`) and deployed, so it's
 something actually served over HTTP, not just runnable locally:
 
 ```bash
-curl -X POST https://<deployment-url>/predict \
+curl -X POST https://emotisense-distilbert-api.onrender.com/predict \
   -H "Content-Type: application/json" \
   -d '{"text": "I am not happy at all"}'
 ```
+
+(Free-tier hosting - the same tradeoff as the Streamlit demo above: the
+service sleeps after inactivity, so the first request after a while can
+take up to a minute while it spins back up.)
 
 ```json
 {
@@ -514,6 +526,14 @@ directly; set it to a Hugging Face Hub repo id to load from there
 instead (what the deployed instance actually does, since that ~268MB
 model directory is gitignored - see `.gitignore`'s "Trained model
 artefacts" comment - and can't ship inside the deployed container).
+
+The Hub copy is pushed as float16 weights (~128MB, half the local fp32
+checkpoint's size) via `scripts/push_distilbert_fp16_to_hub.py` -
+Render's free tier only gives the service 512MB RAM, and downloading +
+loading the full fp32 file alone was enough to exceed that during
+startup (`exit 137` / OOM-killed, twice, before this fix - see the
+commit history on `api/main.py` and that script's docstring for the
+full diagnosis).
 
 ## Audio models
 
