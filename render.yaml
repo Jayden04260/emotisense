@@ -1,0 +1,20 @@
+# Render Blueprint for api/main.py - see README "Deployed DistilBERT
+# API" for what this serves and why. Deploy via Render's dashboard:
+# New -> Blueprint -> connect this repo -> Render reads this file
+# automatically.
+#
+# MODEL_SOURCE below must be set to the Hugging Face Hub repo id the
+# model was pushed to (see scripts/push_distilbert_to_hub.py) - the
+# ~268MB results/distilbert_emotion_model/ directory is gitignored, so
+# Render's checkout of this repo never has it locally; loading from the
+# Hub at startup is how the deployed instance gets the actual weights.
+services:
+  - type: web
+    name: emotisense-distilbert-api
+    runtime: python
+    plan: free
+    buildCommand: "pip install -r requirements-deploy.txt --extra-index-url https://download.pytorch.org/whl/cpu"
+    startCommand: "uvicorn api.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: MODEL_SOURCE
+        value: your-hf-username/emotisense-distilbert # replace after running the push script

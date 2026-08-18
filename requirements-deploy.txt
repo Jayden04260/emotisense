@@ -1,0 +1,16 @@
+# Minimal dependency set for deploying api/main.py (e.g. on Render) -
+# deliberately NOT requirements.txt + requirements-api.txt together,
+# which would also pull in librosa/matplotlib/pandas/streamlit/sklearn
+# etc. that the API never imports (those are for app/app.py and the
+# src/ training/comparison scripts). emotion_logic.py - the one src/
+# module the API imports from - only needs numpy + the standard library
+# (see its own import list), so that's genuinely everything this needs.
+#
+# torch is CPU-only here (see the -f flag in render.yaml's buildCommand)
+# for the same reason local dev setup uses the CPU wheel index - a
+# full CUDA build is large and pointless on Render's CPU-only instances.
+numpy
+torch
+transformers
+fastapi
+uvicorn
