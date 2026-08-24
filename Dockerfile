@@ -6,6 +6,13 @@
 # results/distilbert_emotion_model/ directory is gitignored and never
 # part of the build context anyway - the container always loads weights
 # from the Hugging Face Hub at startup.
+#
+# Also doubles as the AWS Lambda image (see the AWS deploy step of the
+# DevOps retrofit): the Lambda Web Adapter binary below is a Lambda
+# *extension* - the container runtime only starts it when actually run
+# inside Lambda's execution environment, so it sits inert (and harmless)
+# for plain `docker run` and for the Render deploy. One Dockerfile, three
+# targets, instead of maintaining near-duplicates.
 
 FROM python:3.11-slim
 
@@ -24,6 +31,13 @@ RUN pip install --no-cache-dir -r requirements-deploy.txt \
 # src/emotion_logic.py (see main.py's sys.path.insert + import).
 COPY api/ api/
 COPY src/emotion_logic.py src/emotion_logic.py
+
+# Lambda Web Adapter - lets Lambda invoke a plain uvicorn HTTP server
+# (no Mangum/handler rewrite needed). Reads PORT below to know where to
+# forward invocations; no-op outside Lambda. See
+# https://github.com/awslabs/aws-lambda-web-adapter
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:1.0.1 /lambda-adapter /opt/extensions/lambda-adapter
+ENV AWS_LWA_INVOKE_MODE=buffered
 
 ENV MODEL_SOURCE=local
 ENV PORT=8000
