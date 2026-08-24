@@ -1,0 +1,7 @@
+# Local Terraform working dir and state - state files contain the real
+# account ID, ARNs, and resource attributes; never commit them. There's
+# no remote backend configured, so state lives only on this machine.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
