@@ -1,4 +1,4 @@
-name: Tests
+name: CI/CD
 
 on:
   push:
@@ -32,3 +32,30 @@ jobs:
         # deselection alone would still fail at collection with a
         # ModuleNotFoundError; --ignore skips the import entirely.
         run: pytest -v --ignore=tests/test_api.py
+
+  docker-build:
+    # Validates the Dockerfile still builds on every push/PR, independent
+    # of deploy - catches a broken image (bad COPY path, missing dep in
+    # requirements-deploy.txt, etc.) at CI time rather than at deploy time.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build API image
+        run: docker build -t emotisense-api .
+
+  deploy:
+    # Only after both checks above pass, and only for real pushes to main
+    # (not PRs, which could come from a fork and shouldn't be able to
+    # trigger a production deploy) - this is the actual CD half of the
+    # pipeline. Render's own GitHub integration can auto-deploy on push
+    # already, but that happens outside CI and isn't gated on tests or a
+    # successful image build; hitting the deploy hook here makes "tests
+    # + image build pass" a real precondition for shipping, not just a
+    # status check someone could ignore.
+    needs: [test, docker-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy
+        run: curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"

@@ -13,6 +13,9 @@ services:
     name: emotisense-distilbert-api
     runtime: python
     plan: free
+    autoDeploy: false  # deploys are triggered explicitly by .github/workflows/tests.yml's
+                        # `deploy` job (via this service's Deploy Hook URL) only after tests
+                        # and the Docker build both pass - not on every raw push to main.
     buildCommand: "pip install -r requirements-deploy.txt --extra-index-url https://download.pytorch.org/whl/cpu"
     startCommand: "uvicorn api.main:app --host 0.0.0.0 --port $PORT"
     envVars:

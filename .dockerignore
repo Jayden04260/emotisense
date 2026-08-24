@@ -1,0 +1,22 @@
+.git
+.github
+.claude
+.pytest_cache
+venv
+notebooks
+data
+results
+tests
+scripts
+app
+*.pptx
+*.docx
+*.log
+*.ico
+__pycache__
+*.pyc
+.streamlit
+Launch EmotiSense.bat
+README.md
+ROADMAP.md
+LICENSE
