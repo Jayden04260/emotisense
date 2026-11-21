@@ -51,10 +51,14 @@ streamlit
 # app itself imports.
 pytest
 
-# torch/transformers are NOT listed here - they're only needed for the
-# one-off src/train_text_distilbert.py experiment (see ROADMAP.md item
-# 1), app/app.py never imports them, and they're multi-hundred-MB-to-GB
-# packages that have no business in a normal install (or a hosted
-# deploy's build step, where they'd blow the free-tier build budget for
-# zero runtime benefit). See requirements-distilbert.txt if you actually
-# want to re-run that experiment.
+# torch + transformers power the v4 text model (DistilBERT, see
+# src/train_text_transformer.py) and the v2 audio model (WavLM embeddings,
+# see src/train_audio_wavlm.py). The extra index makes pip/uv pick the
+# CPU-only torch build - the hosted app has no GPU, and the default Linux
+# wheel would pull ~2.5GB of CUDA libraries for nothing. (For GPU training
+# locally, install torch from https://download.pytorch.org/whl/cu128 first.)
+# Both models degrade gracefully: if torch isn't installed, app/app.py falls
+# back to the TF-IDF text model and the classical audio model.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+transformers

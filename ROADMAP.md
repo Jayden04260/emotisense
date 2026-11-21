@@ -20,7 +20,9 @@ diversity, no spontaneous speech, and a small speaker pool.
 
 ## 1. Deep learning models (CNN/LSTM/BERT)
 
-**STATUS: text half attempted, done - real, mixed results below.**
+**STATUS: done (2026-11) - text v4 and audio v2 in production. See "v4" at
+the end of this section and README "Model Upgrades". v1-v3 write-ups kept
+below as the record of what didn't work and why.**
 
 **What it means:** Replacing TF-IDF + Linear SVM (text) and hand-engineered
 librosa features + Gradient Boosting (audio) with learned representations.
@@ -163,6 +165,28 @@ label to the negated examples would close that gap and is the more
 promising next attempt, not a straight re-run of this one.
 
 ---
+
+### v4 (2026-11): the labels were the problem - fixed with data
+
+Why v1-v3 couldn't work, whatever the training trick: dair-ai/emotion is
+labelled by distant supervision (the emotion word a tweet contains), so
+negated statements are rare and labelled by the negated word - "i do not
+feel bad about it" is labelled sadness, "i feel content if not happy" is
+labelled joy. Oversampling (v2) amplified those labels; the contrastive
+loss (v3) fought them. Neither could win.
+
+v4 (`src/train_text_transformer.py`) trains on all 16,000 dair-ai rows plus
+GoEmotions (human-labelled, mapped via the Ekman grouping, adds a neutral
+class) on a GPU: 92.9% on the dair-ai test set (v1: 89.0%), 68.7% on the
+GoEmotions test set (TF-IDF production model: 28%), 12/18 behavioural probes
+(TF-IDF: 4/18). "I am not happy at all" -> sadness. Still wrong: sarcasm,
+"I am not sad" (-> sadness), "I'm not angry, just tired" (-> anger).
+
+Audio, done the way this section suggested (a pretrained encoder, not a
+network from scratch): frozen WavLM Base+ embeddings + logistic regression
+(`src/train_audio_wavlm.py`), 75.0% +- 2.3 vs 49.6% +- 1.7 for the classical
+features on the same 5 speaker-grouped folds. No fine-tuning was needed for
+that jump; end-to-end fine-tuning is the obvious next experiment.
 
 ## 2. Larger, more real-world datasets
 

@@ -1,11 +1,12 @@
 import os
+import sys
 import shutil
 
 # Wherever you extracted CREMA-D's AudioWAV.zip to - update this to your own
 # path before running. (Not a real path from anyone's machine - fill this
 # in yourself; this script is a one-off you run once after downloading
 # CREMA-D, not something the app itself calls.)
-SOURCE_DIR = r"C:\path\to\CREMA-D\AudioWAV"
+SOURCE_DIR = sys.argv[1] if len(sys.argv) > 1 else r"C:\path\to\CREMA-D\AudioWAV"  # or pass the folder: python src/sort_cremad.py <folder>
 
 # Project output folder - same data/audio/<emotion>/ tree sort_ravdess.py
 # uses, so train_audio_model.py / compare_audio_models.py pick these up

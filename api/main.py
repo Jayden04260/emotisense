@@ -2,7 +2,9 @@
 api/main.py
 
 FastAPI service wrapping the fine-tuned DistilBERT text-emotion model
-(see src/train_text_distilbert.py, ROADMAP.md item 1) as a deployable
+(v4: src/train_text_transformer.py, published as
+Jayden04260/emotisense-distilbert-v4; v1-v3: src/train_text_distilbert.py,
+ROADMAP.md item 1) as a deployable
 HTTP endpoint - the piece none of this author's other local-only
 projects have: something actually served, not just runnable locally.
 
@@ -22,6 +24,11 @@ despite not being bag-of-words ("I am not happy at all" still scores
 ~94-96% Joy either way) - so the warning is still shown here, on real
 evidence it's needed for this model too, just worded honestly about
 *why* (a training-data/objective gap, not an architectural one).
+
+That gap turned out to be the labels themselves (see ROADMAP.md "v4"):
+v4 adds human-labelled GoEmotions data and a neutral class, and gets "I am
+not happy at all" right (sadness), so the negation caveat is no longer
+attached for it - see _build_warning.
 
 Run locally with:
 
@@ -51,7 +58,7 @@ from emotion_logic import confidence_warning, detect_negated_sentiment  # noqa: 
 
 LOCAL_MODEL_DIR = ROOT_DIR / "results" / "distilbert_emotion_model"
 MODEL_SOURCE = os.environ.get("MODEL_SOURCE", "local")
-MAX_LENGTH = 64  # matches train_text_distilbert.py
+MAX_LENGTH = 128  # matches train_text_transformer.py (v4); v1-v3 used 64, which still fits comfortably
 
 _model = None
 _tokenizer = None
@@ -85,7 +92,15 @@ def _build_warning(prob_dict: dict[str, float], text: str) -> str | None:
     """Same underlying signals as emotion_logic.confidence_warning, but
     with the negation message reworded for this model - see module
     docstring for why the original wording (written for the TF-IDF
-    model) doesn't apply verbatim here."""
+    model) doesn't apply verbatim here.
+
+    The negation caveat is only attached for the v1-v3 models (trained on
+    dair-ai/emotion alone, whose labels taught them to ignore negation).
+    v4 (src/train_text_transformer.py - recognisable by its neutral class)
+    was trained on human-labelled GoEmotions too and handles most negations
+    itself, so it gets only the generic confidence checks."""
+    if "neutral" in prob_dict:
+        return confidence_warning(prob_dict)
     negated = detect_negated_sentiment(text)
     if negated is not None:
         neg_word, sent_word, score = negated
@@ -139,7 +154,9 @@ def predict(request: PredictRequest):
     )
     with torch.no_grad():
         logits = _model(**encoding).logits
-    probs = torch.softmax(logits, dim=-1)[0]
+    # Softmax in float32: the model runs in fp16 to fit Render's 512MB, but
+    # an fp16 softmax leaves the probabilities summing to ~0.9998, not 1.
+    probs = torch.softmax(logits.float(), dim=-1)[0]
     prob_dict = {label: float(p) for label, p in zip(_label_names, probs)}
     top_label = max(prob_dict, key=prob_dict.get)
 
