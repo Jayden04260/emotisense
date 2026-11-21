@@ -27,6 +27,14 @@ AUDIO_MODEL_ACCURACY = 0.528
 TEXT_FUSION_WEIGHT = TEXT_MODEL_ACCURACY / (TEXT_MODEL_ACCURACY + AUDIO_MODEL_ACCURACY)
 AUDIO_FUSION_WEIGHT = 1 - TEXT_FUSION_WEIGHT
 
+# The v4 text transformer (src/train_text_transformer.py - dair-ai test set,
+# same benchmark as TEXT_MODEL_ACCURACY) and the v2 WavLM audio model
+# (src/train_audio_wavlm.py - 5-fold actor-grouped CV, same evaluation as
+# AUDIO_MODEL_ACCURACY). app.py uses these for fusion weighting whenever
+# those backends are the ones actually serving.
+TRANSFORMER_TEXT_MODEL_ACCURACY = 0.929
+WAVLM_AUDIO_MODEL_ACCURACY = 0.750
+
 # Maps the audio model's class labels onto the text model's label space for
 # fusion/recommendation purposes. "neutral" is left as its own category
 # rather than folded into "joy" - the text model has no neutral class of
@@ -249,7 +257,7 @@ def detect_negated_sentiment(text):
     return None
 
 
-def generate_conversational_reply(label, probs, mood_mode="match", exclude_text=None, text=None, rng=None):
+def generate_conversational_reply(label, probs, mood_mode="match", exclude_text=None, text=None, rng=None, hedge=None):
     """Returns a single templated, empathetic reply string for the Chat
     tab - an acknowledgement of the detected emotion plus a transition
     into the song recommendation that follows it in the UI.
@@ -272,14 +280,21 @@ def generate_conversational_reply(label, probs, mood_mode="match", exclude_text=
     otherwise), the reply is prefixed with a hedging phrase rather than
     stating the emotion as settled fact - the Chat tab's equivalent of the
     warning banner shown elsewhere.
+
+    hedge, if given (True/False), overrides that check entirely - for
+    callers that have already decided whether the prediction needs a
+    caveat (app.py's predict_text(), which knows which backend produced
+    the prediction and so which checks actually apply to it).
     """
     rng = rng if rng is not None else np.random.default_rng()
+    if hedge is None:
+        hedge = confidence_warning(probs, text=text) is not None
 
     pool = CHAT_ACKNOWLEDGEMENTS.get(label, CHAT_ACKNOWLEDGEMENTS["neutral"])
     candidates = [t for t in pool if not (exclude_text or "").startswith(t)] or pool
     acknowledgement = candidates[rng.integers(len(candidates))]
 
-    if confidence_warning(probs, text=text) is not None:
+    if hedge:
         prefix = CHAT_LOW_CONFIDENCE_PREFIXES[rng.integers(len(CHAT_LOW_CONFIDENCE_PREFIXES))]
         acknowledgement = prefix + acknowledgement[0].lower() + acknowledgement[1:]
 
@@ -340,6 +355,68 @@ def extract_audio_features(file_path, target_sr=22050, max_duration=5):
     return np.hstack([mfcc_mean, zcr_mean, chroma_mean, rms_mean])
 
 
+# --------------------------------------------------------------------------
+# Pretrained speech embeddings (WavLM) - the v2 audio model. A frozen,
+# self-supervised speech encoder (Microsoft's WavLM Base+, trained on 94k
+# hours of unlabelled speech) turns a clip into a 768-dim vector per
+# transformer layer; a plain logistic regression on one layer's mean-pooled
+# output does the emotion classification. On the same actor-grouped 5-fold
+# evaluation as everything else, that's 75.3% vs 49.6% for the 54 MFCC/
+# chroma/ZCR/RMS features (see README "Audio model v2"). Nothing is
+# fine-tuned, so the encoder loads straight from Microsoft's own Hub repo
+# and only the small classifier ships in this repo.
+#
+# torch/transformers are imported lazily, same reasoning as librosa in
+# extract_audio_features: nothing else in this module needs them.
+# --------------------------------------------------------------------------
+
+WAVLM_MODEL_ID = "microsoft/wavlm-base-plus"
+WAVLM_SAMPLE_RATE = 16000
+WAVLM_MAX_SECONDS = 8
+
+
+@functools.lru_cache(maxsize=1)
+def load_wavlm(model_id=WAVLM_MODEL_ID):
+    import torch
+    from transformers import AutoFeatureExtractor, WavLMModel
+
+    feature_extractor = AutoFeatureExtractor.from_pretrained(model_id)
+    model = WavLMModel.from_pretrained(model_id, torch_dtype=torch.float32).eval()
+    return feature_extractor, model
+
+
+def wavlm_layer_embeddings(file_path, model_id=WAVLM_MODEL_ID, device="cpu"):
+    """Mean-pooled hidden state of every WavLM layer for one clip:
+    an array of shape (n_layers + 1, hidden_dim). Same preprocessing the
+    classifier was trained with (src/train_audio_wavlm.py): 16 kHz mono,
+    leading/trailing silence trimmed (top_db=20), capped at 8 seconds,
+    padded to at least 0.1 s. No volume normalisation - WavLM's own
+    feature extractor normalises the waveform."""
+    import librosa
+    import torch
+
+    y, _ = librosa.load(file_path, sr=WAVLM_SAMPLE_RATE)
+    if len(y) == 0 or not np.any(y):
+        raise ValueError("Audio is empty or silent.")
+    y, _ = librosa.effects.trim(y, top_db=20)
+    min_len = WAVLM_SAMPLE_RATE // 10
+    if len(y) < min_len:
+        y = np.pad(y, (0, min_len - len(y)))
+    y = y[: WAVLM_SAMPLE_RATE * WAVLM_MAX_SECONDS]
+
+    feature_extractor, model = load_wavlm(model_id)
+    model = model.to(device)
+    inputs = feature_extractor(y, sampling_rate=WAVLM_SAMPLE_RATE, return_tensors="pt").input_values.to(device)
+    with torch.no_grad():
+        hidden_states = model(inputs, output_hidden_states=True).hidden_states
+    return torch.stack([h[0].mean(0) for h in hidden_states]).cpu().numpy()
+
+
+def extract_wavlm_features(file_path, layer, model_id=WAVLM_MODEL_ID):
+    """The single-layer feature vector the WavLM audio classifier expects."""
+    return wavlm_layer_embeddings(file_path, model_id)[layer]
+
+
 def model_classes(model):
     """Return the class labels for either a bare estimator or a Pipeline."""
     if hasattr(model, "classes_"):
@@ -377,18 +454,28 @@ def map_audio_probs_to_text_space(probs: dict) -> dict:
     return mapped
 
 
-def fuse_predictions(text_probs: dict, audio_probs: dict) -> dict:
+def fusion_weights(text_accuracy=TEXT_MODEL_ACCURACY, audio_accuracy=AUDIO_MODEL_ACCURACY):
+    """(text_weight, audio_weight), proportional to each model's accuracy."""
+    text_weight = text_accuracy / (text_accuracy + audio_accuracy)
+    return text_weight, 1 - text_weight
+
+
+def fuse_predictions(text_probs: dict, audio_probs: dict,
+                     text_accuracy=TEXT_MODEL_ACCURACY, audio_accuracy=AUDIO_MODEL_ACCURACY) -> dict:
     """Decision-level fusion: blend the text and audio models' probability
     distributions into one, weighted by each model's own test accuracy
-    (TEXT_FUSION_WEIGHT / AUDIO_FUSION_WEIGHT). Both distributions already
+    (see fusion_weights - defaults to the classical models' accuracies, i.e.
+    TEXT_FUSION_WEIGHT / AUDIO_FUSION_WEIGHT; app.py passes the accuracies
+    of whichever backends are actually serving). Both distributions already
     sum to 1 and the two weights sum to 1, so the fused result sums to 1
     too - no renormalisation needed."""
+    text_weight, audio_weight = fusion_weights(text_accuracy, audio_accuracy)
     audio_in_text_space = map_audio_probs_to_text_space(audio_probs)
     fused = {}
     for label, prob in text_probs.items():
-        fused[label] = fused.get(label, 0.0) + TEXT_FUSION_WEIGHT * prob
+        fused[label] = fused.get(label, 0.0) + text_weight * prob
     for label, prob in audio_in_text_space.items():
-        fused[label] = fused.get(label, 0.0) + AUDIO_FUSION_WEIGHT * prob
+        fused[label] = fused.get(label, 0.0) + audio_weight * prob
     return fused
 
 
@@ -474,6 +561,28 @@ def validate_text_input(text: str):
             "prediction."
         )
     return cleaned, None
+
+
+UNKNOWN_VOCABULARY_WARNING = (
+    "None of the words in this input appear in the text model's vocabulary "
+    "(gibberish, emoji, punctuation, or a language it wasn't trained on), so "
+    "it had nothing to go on - this prediction is effectively a guess."
+)
+
+
+def unknown_vocabulary_warning(known_token_count: int):
+    """Out-of-vocabulary flag for the bag-of-words (TF-IDF) text model.
+
+    Input whose tokens are all outside the vectorizer's vocabulary becomes
+    an all-zero feature vector. The model still returns a distribution for
+    it - and since the Linear SVM was calibrated (see README "Adversarial
+    Input Exploration"), that distribution came out as a confident-looking
+    57% Joy, above both of confidence_warning()'s thresholds, so it was
+    never flagged. Checking the input directly ("did any token match?")
+    catches it regardless of what the calibrated score happens to be.
+    Callers pass the vectorized row's non-zero count (`vec.nnz`).
+    """
+    return UNKNOWN_VOCABULARY_WARNING if known_token_count == 0 else None
 
 
 def confidence_warning(probs: dict, text: str = None, low_threshold=0.40, margin_threshold=0.10):

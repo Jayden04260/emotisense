@@ -59,19 +59,24 @@ from emotion_logic import (  # noqa: E402 (must follow sys.path insert)
     HISTORY_COLUMNS,
     MAX_AUDIO_UPLOAD_BYTES,
     MOOD_SHIFT_MAP,
-    TEXT_FUSION_WEIGHT,
     TEXT_MODEL_ACCURACY,
-    AUDIO_FUSION_WEIGHT,
+    TRANSFORMER_TEXT_MODEL_ACCURACY,
+    UNKNOWN_VOCABULARY_WARNING,
+    WAVLM_AUDIO_MODEL_ACCURACY,
+    fusion_weights,
     apply_negation_adjustment,
     confidence_warning,
     extract_audio_features,
+    extract_wavlm_features,
     fuse_predictions,
+    load_wavlm,
     generate_conversational_reply,
     map_audio_probs_to_text_space,
     model_classes,
     normalize_history_columns,
     predict_with_confidence,
     recommend_music,
+    unknown_vocabulary_warning,
     validate_text_input,
 )
 
@@ -193,6 +198,91 @@ def load_text_pipeline():
     return _load_text_pipeline_cached(TEXT_MODEL_PATH.stat().st_mtime, VECTORIZER_PATH.stat().st_mtime)
 
 
+# --------------------------------------------------------------------------
+# Text model backend. The fine-tuned transformer (src/train_text_transformer.py
+# - v4, trained on dair-ai/emotion + GoEmotions, with a neutral class)
+# handles negation and neutral input far better than TF-IDF (see README
+# "Text model v4"), but needs torch + transformers. TEXT_MODEL_SOURCE
+# (secrets or env) picks it:
+#   - unset: results/distilbert_emotion_model/ if it exists (a local
+#     training run), otherwise the published v4 model on the Hub
+#     (DEFAULT_TEXT_MODEL_REPO - what the hosted app uses, since the model
+#     directory is gitignored)
+#   - "tfidf": always TF-IDF
+#   - a Hugging Face Hub repo id: load the transformer from there
+# If torch/transformers aren't installed or loading fails, falls back to
+# TF-IDF rather than breaking the app - same graceful-degradation rule as
+# the optional Spotify features.
+# --------------------------------------------------------------------------
+
+TRANSFORMER_MODEL_DIR = RESULTS_DIR / "distilbert_emotion_model"
+DEFAULT_TEXT_MODEL_REPO = "Jayden04260/emotisense-distilbert-v4"
+TEXT_MODEL_SOURCE = _get_secret("TEXT_MODEL_SOURCE") or os.environ.get("TEXT_MODEL_SOURCE", "")
+
+
+@st.cache_resource(show_spinner="Loading the text model...")
+def _load_transformer_cached(source: str):
+    import torch
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained(source)
+    model = AutoModelForSequenceClassification.from_pretrained(source, torch_dtype=torch.float32).eval()
+    return tokenizer, model
+
+
+def load_transformer():
+    """(tokenizer, model) or None if the TF-IDF backend should be used."""
+    source = TEXT_MODEL_SOURCE
+    if source.lower() == "tfidf":
+        return None
+    if not source:
+        source = str(TRANSFORMER_MODEL_DIR) if TRANSFORMER_MODEL_DIR.exists() else DEFAULT_TEXT_MODEL_REPO
+    try:
+        return _load_transformer_cached(source)
+    except Exception as exc:  # torch missing, Hub unreachable, bad repo id...
+        print(f"Text transformer unavailable ({exc}); falling back to TF-IDF")
+        return None
+
+
+def text_backend_name():
+    return "DistilBERT (fine-tuned, v4)" if load_transformer() is not None else "TF-IDF + Linear SVM"
+
+
+def predict_text(cleaned_text, adjust_negation=True):
+    """Single entry point for every text prediction (Chat, Text, Multimodal).
+
+    Returns (label, probs, note). note is a user-facing caveat or None.
+    The AFINN negation adjustment and the out-of-vocabulary check only
+    apply to the TF-IDF backend - they exist to patch bag-of-words blind
+    spots the transformer doesn't have (it handles "not happy" itself, and
+    tokenises any input into subwords). Multimodal passes
+    adjust_negation=False and adjusts the fused distribution instead.
+    """
+    transformer = load_transformer()
+    if transformer is not None:
+        import torch
+
+        tokenizer, model = transformer
+        enc = tokenizer(cleaned_text, truncation=True, max_length=128, return_tensors="pt")
+        with torch.no_grad():
+            p = torch.softmax(model(**enc).logits, -1)[0].tolist()
+        probs = {model.config.id2label[i]: prob for i, prob in enumerate(p)}
+        label = max(probs, key=probs.get)
+        return label, probs, confidence_warning(probs)
+
+    model, vectorizer = load_text_pipeline()
+    vec = vectorizer.transform([cleaned_text])
+    label, probs = predict_with_confidence(model, vec)
+    oov_note = unknown_vocabulary_warning(vec.nnz)
+    if oov_note:
+        return label, probs, oov_note
+    if adjust_negation:
+        probs, negation_note = apply_negation_adjustment(probs, cleaned_text)
+        if negation_note:
+            return max(probs, key=probs.get), probs, negation_note
+    return label, probs, confidence_warning(probs)
+
+
 @st.cache_resource(show_spinner=False)
 def _load_audio_model_cached(model_mtime: float):
     return joblib.load(AUDIO_MODEL_PATH)
@@ -200,6 +290,56 @@ def _load_audio_model_cached(model_mtime: float):
 
 def load_audio_model():
     return _load_audio_model_cached(AUDIO_MODEL_PATH.stat().st_mtime)
+
+
+# Audio model v2 (src/train_audio_wavlm.py): frozen WavLM embeddings + a
+# small logistic regression, 75% vs ~50% actor-grouped accuracy for the
+# classical model above. The pickle holds only the classifier and the layer
+# index; the encoder itself loads from Microsoft's public Hub repo. Same
+# fallback rule as the text transformer: if torch/transformers or the Hub
+# aren't available, the classical model keeps working.
+AUDIO_WAVLM_MODEL_PATH = RESULTS_DIR / "audio_emotion_model_wavlm.pkl"
+
+
+@st.cache_resource(show_spinner="Loading the speech model...")
+def _load_wavlm_bundle_cached(model_mtime: float):
+    bundle = joblib.load(AUDIO_WAVLM_MODEL_PATH)
+    load_wavlm(bundle["encoder"])  # download/load the encoder now, not on first prediction
+    return bundle
+
+
+def load_wavlm_bundle():
+    if not AUDIO_WAVLM_MODEL_PATH.exists():
+        return None
+    try:
+        return _load_wavlm_bundle_cached(AUDIO_WAVLM_MODEL_PATH.stat().st_mtime)
+    except Exception as exc:
+        print(f"WavLM audio model unavailable ({exc}); falling back to the classical model")
+        return None
+
+
+def audio_backend_name():
+    return "WavLM embeddings + logistic regression" if load_wavlm_bundle() is not None else "MFCC/chroma features + Random Forest"
+
+
+def active_model_accuracies():
+    """(text_accuracy, audio_accuracy) of the backends actually serving -
+    what Multimodal fusion weights by, and what the dashboard reports."""
+    text_acc = TRANSFORMER_TEXT_MODEL_ACCURACY if load_transformer() is not None else TEXT_MODEL_ACCURACY
+    audio_acc = WAVLM_AUDIO_MODEL_ACCURACY if load_wavlm_bundle() is not None else AUDIO_MODEL_ACCURACY
+    return text_acc, audio_acc
+
+
+def predict_audio(audio_path):
+    """Single entry point for audio predictions: (label, probs).
+    Raises ValueError for unusable clips (silent/empty), like
+    extract_audio_features always has, so callers' error handling is unchanged."""
+    bundle = load_wavlm_bundle()
+    if bundle is not None:
+        features = extract_wavlm_features(audio_path, bundle["layer"], bundle["encoder"]).reshape(1, -1)
+        return predict_with_confidence(bundle["model"], features)
+    features = extract_audio_features(audio_path).reshape(1, -1)
+    return predict_with_confidence(load_audio_model(), features)
 
 
 @st.cache_data(show_spinner=False)
@@ -723,12 +863,7 @@ with tab_chat:
         st.session_state["chat_messages"].append({"role": "user", "content": chat_input, "song": None})
 
         cleaned_text, length_note = validate_text_input(chat_input)
-        model, vectorizer = load_text_pipeline()
-        vec = vectorizer.transform([cleaned_text])
-        label, probs = predict_with_confidence(model, vec)
-        probs, negation_note = apply_negation_adjustment(probs, cleaned_text)
-        if negation_note:
-            label = max(probs, key=probs.get)
+        label, probs, text_note = predict_text(cleaned_text)
         song = recommend_music(
             probs,
             music_df,
@@ -743,7 +878,9 @@ with tab_chat:
             probs,
             mood_mode=mood_mode,
             exclude_text=st.session_state.get("last_chat_reply"),
-            text=None if negation_note else cleaned_text,
+            # Hedge exactly when predict_text() attached a caveat - it knows
+            # which checks apply to whichever backend made the prediction.
+            hedge=text_note is not None,
         )
         st.session_state["last_chat_reply"] = reply
         if length_note:
@@ -756,7 +893,7 @@ with tab_chat:
                 "label": label,
                 "confidence": probs[label],
                 "song": song,
-                "warning": negation_note or confidence_warning(probs),
+                "warning": text_note,
             }
         )
 
@@ -780,7 +917,7 @@ with tab_chat:
 
 with tab_text:
     st.subheader("Text emotion detection")
-    st.caption("TF-IDF + Linear SVM - trained/compared in src/train_text_model.py and src/compare_text_models.py")
+    st.caption(f"Text model: {text_backend_name()} - see the README's model comparison for how it was chosen")
 
     text_input = st.text_area(
         "How are you feeling? Describe it in a sentence or two.",
@@ -796,12 +933,7 @@ with tab_text:
             if length_note:
                 st.caption(length_note)
 
-            model, vectorizer = load_text_pipeline()
-            vec = vectorizer.transform([cleaned_text])
-            label, probs = predict_with_confidence(model, vec)
-            probs, negation_note = apply_negation_adjustment(probs, cleaned_text)
-            if negation_note:
-                label = max(probs, key=probs.get)
+            label, probs, text_note = predict_text(cleaned_text)
             song = recommend_music(
                 probs,
                 music_df,
@@ -817,9 +949,8 @@ with tab_text:
 
             show_confidence_chart(probs, label)
 
-            warning = negation_note or confidence_warning(probs)
-            if warning:
-                st.info(warning)
+            if text_note:
+                st.info(text_note)
 
             append_history(
                 mode="Text",
@@ -835,11 +966,7 @@ with tab_text:
 
 with tab_audio:
     st.subheader("Audio emotion detection")
-    st.caption(
-        "MFCC + Zero-Crossing-Rate + Chroma + RMS features -> Random "
-        "Forest - trained/compared in src/train_audio_model.py and "
-        "src/compare_audio_models.py"
-    )
+    st.caption(f"Audio model: {audio_backend_name()} - see the README's model comparison for how it was chosen")
 
     audio_source = st.radio(
         "Choose an input method",
@@ -913,9 +1040,7 @@ with tab_audio:
     if audio_path and st.button("Analyse audio", type="primary", key="analyse_audio"):
         try:
             with st.spinner("Extracting features and predicting..."):
-                features = extract_audio_features(audio_path).reshape(1, -1)
-                audio_model = load_audio_model()
-                label, probs = predict_with_confidence(audio_model, features)
+                label, probs = predict_audio(audio_path)
                 canonical_probs = map_audio_probs_to_text_space(probs)
                 song = recommend_music(
                     canonical_probs,
@@ -964,10 +1089,11 @@ with tab_audio:
 
 with tab_multimodal:
     st.subheader("Multimodal emotion detection")
+    mm_text_weight, mm_audio_weight = fusion_weights(*active_model_accuracies())
     st.caption(
         "Runs the text and audio models independently, then blends their "
         "predictions into one result - weighted by each model's own test "
-        f"accuracy (Text {TEXT_FUSION_WEIGHT:.0%} / Audio {AUDIO_FUSION_WEIGHT:.0%})."
+        f"accuracy (Text {mm_text_weight:.0%} / Audio {mm_audio_weight:.0%})."
     )
 
     mm_text_input = st.text_area(
@@ -1060,16 +1186,14 @@ with tab_multimodal:
                 st.caption(mm_length_note)
 
             with st.spinner("Running both models and blending the results..."):
-                text_model, vectorizer = load_text_pipeline()
-                text_vec = vectorizer.transform([mm_cleaned_text])
-                text_label, text_probs = predict_with_confidence(text_model, text_vec)
+                text_label, text_probs, text_note = predict_text(mm_cleaned_text, adjust_negation=False)
 
-                features = extract_audio_features(mm_audio_path).reshape(1, -1)
-                audio_model = load_audio_model()
-                audio_label, audio_probs = predict_with_confidence(audio_model, features)
+                audio_label, audio_probs = predict_audio(mm_audio_path)
 
-                fused_probs = fuse_predictions(text_probs, audio_probs)
-                fused_probs, negation_note = apply_negation_adjustment(fused_probs, mm_cleaned_text)
+                fused_probs = fuse_predictions(text_probs, audio_probs, *active_model_accuracies())
+                negation_note = None
+                if load_transformer() is None:  # bag-of-words patch - see predict_text()
+                    fused_probs, negation_note = apply_negation_adjustment(fused_probs, mm_cleaned_text)
                 fused_label = max(fused_probs, key=fused_probs.get)
                 song = recommend_music(
                     fused_probs,
@@ -1120,7 +1244,8 @@ with tab_multimodal:
                     "overall, but still factors in the audio signal."
                 )
 
-            warning = negation_note or confidence_warning(fused_probs)
+            text_oov_note = text_note if text_note == UNKNOWN_VOCABULARY_WARNING else None
+            warning = negation_note or text_oov_note or confidence_warning(fused_probs)
             if warning:
                 st.info(warning)
 
@@ -1156,23 +1281,26 @@ with tab_dashboard:
         "in this app."
     )
 
+    live_text_acc, live_audio_acc = active_model_accuracies()
+    live_text_weight, live_audio_weight = fusion_weights(live_text_acc, live_audio_acc)
     perf_col1, perf_col2 = st.columns(2)
     with perf_col1:
         st.metric(
             "Text model (production)",
-            "Linear SVM",
-            f"{TEXT_MODEL_ACCURACY * 100:.1f}% accuracy",
+            text_backend_name(),
+            f"{live_text_acc * 100:.1f}% accuracy",
         )
     with perf_col2:
         st.metric(
             "Audio model (production)",
-            "Random Forest",
-            f"{AUDIO_MODEL_ACCURACY * 100:.1f}% accuracy",
+            audio_backend_name(),
+            f"{live_audio_acc * 100:.1f}% accuracy",
         )
     st.caption(
         "These are the real test-set accuracies used to weight Multimodal "
-        f"fusion (Text {TEXT_FUSION_WEIGHT:.0%} / Audio {AUDIO_FUSION_WEIGHT:.0%} "
-        "- see the Multimodal tab)."
+        f"fusion (Text {live_text_weight:.0%} / Audio {live_audio_weight:.0%} "
+        "- see the Multimodal tab). Text: dair-ai/emotion test set. Audio: "
+        "5-fold cross-validation with no speaker in both train and test."
     )
 
     text_comparison = load_comparison_csv(TEXT_COMPARISON_CSV)

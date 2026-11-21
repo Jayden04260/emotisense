@@ -1,11 +1,12 @@
 import os
+import sys
 import shutil
 
 # Wherever you extracted RAVDESS's Audio_Speech_Actors_01-24.zip to -
 # update this to your own path before running. (Not a real path from
 # anyone's machine - fill this in yourself; this script is a one-off you
 # run once after downloading RAVDESS, not something the app itself calls.)
-SOURCE_DIR = r"C:\path\to\Audio_Speech_Actors_01-24"
+SOURCE_DIR = sys.argv[1] if len(sys.argv) > 1 else r"C:\path\to\Audio_Speech_Actors_01-24"  # or pass the folder: python src/sort_ravdess.py <folder>
 
 # Project output folder - same data/audio/<emotion>/ tree sort_cremad.py
 # uses, so train_audio_model.py / compare_audio_models.py pick these up

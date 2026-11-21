@@ -50,6 +50,9 @@ results/temp_recording.wav
 !results/emotion_model.pkl
 !results/vectorizer.pkl
 !results/audio_emotion_model.pkl
+# v2 audio classifier (~50KB) - only the logistic regression on top of
+# WavLM; the encoder itself loads from Microsoft's Hub repo at runtime.
+!results/audio_emotion_model_wavlm.pkl
 
 # Third-party datasets - not this project's to redistribute (RAVDESS and
 # CREMA-D both carry their own research-use licenses; the text dataset's
@@ -80,3 +83,8 @@ desktop.ini
 # Microsoft Office lock files (created while a .docx/.pptx/.xlsx is open
 # elsewhere) - transient, not project content.
 ~$*
+
+# Training scratch: Trainer checkpoints (src/train_text_transformer.py) and
+# the WavLM embedding cache (src/train_audio_wavlm.py) - large and rebuildable.
+results/_distilbert_checkpoints/
+results/_wavlm_embeddings.npz

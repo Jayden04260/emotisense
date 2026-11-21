@@ -1,0 +1,22 @@
+Behavioural probes (v4: full dair-ai + GoEmotions, neutral class)
+
+PASS  negation         'I am not happy at all'                       -> sadness   ( 58.4%)
+FAIL  negation         'I am not sad'                                -> sadness   ( 68.5%)
+PASS  negation         'im not having the best day'                  -> sadness   ( 77.0%)
+FAIL  negation         "I don't feel good about this"                -> joy       ( 44.7%)
+PASS  negation         "this isn't fun anymore"                      -> anger     ( 93.9%)
+FAIL  negation         "I'm not angry, just tired"                   -> anger     ( 51.3%)
+FAIL  negation         "I'm not scared of anything"                  -> fear      ( 43.4%)
+FAIL  double negative  "I wouldn't say I'm not pleased"              -> anger     ( 86.4%)
+PASS  neutral          'The meeting is at 3pm tomorrow'              -> neutral   ( 80.0%)
+PASS  neutral          'ok'                                          -> neutral   ( 75.5%)
+PASS  neutral          'I bought milk and bread from the shop'       -> neutral   ( 77.1%)
+PASS  neutral          'The train leaves from platform 4'            -> neutral   ( 88.0%)
+FAIL  sarcasm          'Oh great, cancelled again. Just perfect.'    -> joy       ( 97.0%)
+PASS  plain            'I AM SO ANGRY RIGHT NOW'                     -> anger     ( 99.0%)
+PASS  plain            "I'm so happy for you!"                       -> joy       ( 98.6%)
+PASS  plain            'I miss her so much it hurts'                 -> sadness   ( 99.3%)
+PASS  plain            "I'm terrified of the exam tomorrow"          -> fear      ( 99.0%)
+PASS  plain            'Wow, I did not expect that at all!'          -> surprise  ( 92.5%)
+
+12/18 passed

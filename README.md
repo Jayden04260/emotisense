@@ -6,6 +6,13 @@ after a while can take up to a minute to wake back up)
 
 ## Highlights
 
+- **Text model v4 and audio model v2 (2026-11):** found *why* the
+  negation fix never worked - the text dataset's own labels teach models
+  to ignore "not" - and fixed it with human-labelled data plus a neutral
+  class; replaced hand-built audio features with a pretrained speech
+  encoder. Text: 89.5% -> **92.9%**, and 28% -> **69%** on real-world
+  (GoEmotions) text. Audio: ~50% -> **75.0%** on the same leakage-free,
+  speaker-grouped evaluation. See [Model Upgrades](#model-upgrades-text-v4-and-audio-v2).
 - **Found and fixed a real data leakage bug:** an audit of the audio
   model's train/test split found 100% of test-set actors also appeared
   in training - not a partial leak, every single one. Fixing it (grouped,
@@ -44,6 +51,87 @@ after a while can take up to a minute to wake back up)
 - 75 automated tests, full CI-style reproducibility (every reported
   number comes from a script you can re-run), and this README documents
   the failed experiments alongside the ones that worked.
+
+## Model Upgrades: Text v4 and Audio v2
+
+Both models in the live app were replaced in Nov 2026. Each change was
+measured on the same benchmark as the model it replaced, and the old
+models stay in the app as automatic fallbacks (see "Graceful fallback").
+
+### Text model v4: the negation problem was in the labels
+
+ROADMAP.md's v1-v3 attempts (oversampling negations, a contrastive loss)
+all failed to make DistilBERT read "I am not happy at all" as anything but
+joy. The reason turned out to be the dataset itself: the "Emotions dataset
+for NLP" (dair-ai/emotion) is labelled by distant supervision - each tweet's
+label is the emotion word it contains, not what it means. Negated statements
+are rare (fewer than 10 of 16,000 for "not happy"/"don't feel good"-style
+phrasings) *and labelled by the negated word*: "i do not feel bad about it"
+is labelled **sadness**, "i feel content if not happy" is labelled **joy**.
+Any model trained on those labels is being taught to ignore negation.
+
+The fix was data, not architecture: `src/train_text_transformer.py`
+fine-tunes DistilBERT on all 16,000 dair-ai rows (v1-v3 used a 3,000-row
+subset, because a full epoch took ~3.5h on the old CPU-only laptop - on a GPU
+the whole run takes ~2 minutes) **plus GoEmotions** (Demszky et al., 2020:
+58k Reddit comments labelled by human raters, mapped onto this project's
+labels via the standard Ekman grouping). GoEmotions also brings a
+**neutral** class, which the text model never had - "ok" used to come back
+as 99% joy.
+
+| | TF-IDF + SVM (previous) | DistilBERT v1 (3k subset) | **DistilBERT v4** |
+|---|---|---|---|
+| dair-ai test set (2,000 rows) | 89.5% | 89.0% | **92.9%** (macro-F1 87.9%) |
+| GoEmotions test set (real-world text) | 28% | - | **68.7%** |
+| Behavioural probes (negation, neutral, sarcasm, plain) | 4/18 | - | **12/18** |
+
+The 28% is worth dwelling on: the previous model had learned this one
+dataset's quirks, not emotion - on human-labelled text it does badly. v4
+still gets sarcasm wrong ("Oh great, cancelled again. Just perfect." -> 97%
+joy) and some negations ("I am not sad" -> sadness, "I'm not angry, just
+tired" -> anger) - every probe result, pass or fail, is in
+`results/distilbert_negation_probe.txt`. The model is published at
+[Jayden04260/emotisense-distilbert-v4](https://huggingface.co/Jayden04260/emotisense-distilbert-v4)
+(fp16) and is what both the Streamlit app and the Render API now load.
+
+### Audio model v2: a pretrained speech encoder
+
+`src/train_audio_wavlm.py` replaces the 54 MFCC/chroma/ZCR/RMS summary
+features with embeddings from **WavLM Base+** (Microsoft; self-supervised on
+94k hours of speech), frozen - nothing is fine-tuned - with a plain logistic
+regression on top. Same 7,035 RAVDESS + CREMA-D clips, same actor-grouped
+`StratifiedGroupKFold` split as everything in "Fairness & Generalisation
+Audit", scored on all 5 folds rather than one:
+
+| Features (same 5 speaker-grouped folds) | Accuracy |
+|---|---|
+| 54 MFCC/chroma/ZCR/RMS means + Random Forest (previous) | 49.6% +- 1.7 |
+| 539 richer hand-built features (deltas, spectral contrast, pitch) + logistic regression | 57.2% +- 1.9 |
+| **WavLM Base+ layer 6 embeddings + logistic regression** | **75.0% +- 2.3** (macro-F1 75.2%) |
+
+(The previous model's single-split figure was 52.8%; across all five folds
+it averages 49.6%, which is the fair comparison.) The WavLM layer is chosen
+by cross-validation inside each training fold - middle layers (6-7) win,
+consistent with emotion living in prosody and voice quality rather than the
+phonetic content the top layers specialise in. Only the ~50KB classifier
+ships in this repo (`results/audio_emotion_model_wavlm.pkl`); the encoder
+loads from Microsoft's own Hub repo. One completely silent CREMA-D clip
+(`1076_MTI_SAD_XX.wav`) is skipped.
+
+### Graceful fallback
+
+Both models need `torch` + `transformers` (now in `requirements.txt`, as the
+CPU-only build). If either isn't available, or the Hub can't be reached,
+`app/app.py` falls back to the TF-IDF text model and the classical audio
+model, and the captions on each tab say which model is serving. Set
+`TEXT_MODEL_SOURCE = "tfidf"` in Streamlit secrets to force the light
+text model. Multimodal fusion weights follow whichever models are actually
+serving (92.9% / 75.0% -> roughly 55% text / 45% audio for the new pair).
+
+Also fixed along the way: gibberish, emoji-only and non-English input used to
+get a confident 57% joy from the TF-IDF model with no warning (see
+"Adversarial Input Exploration") - the TF-IDF path now flags any input with
+zero vocabulary overlap directly.
 
 ## Overview
 
@@ -90,8 +178,9 @@ The system includes:
 ## Text Mode
 
  User enters written text
- TF-IDF vectorisation processes text
- Linear SVM predicts emotion
+ DistilBERT v4 (fine-tuned transformer) classifies it into 7 emotions
+  including neutral - TF-IDF + Linear SVM is the automatic fallback (see
+  "Model Upgrades")
  Emotion-linked music recommendation is displayed
 
 ## Audio File Mode
@@ -108,7 +197,8 @@ The system includes:
    Zero Crossing Rate
    Chroma
    RMS Energy
- Gradient Boosting predicts emotion
+ WavLM Base+ speech embeddings + logistic regression predict emotion
+  (the classical features above are the fallback - see "Model Upgrades")
  Song recommendation provided
 
 ## Microphone Mode
@@ -123,11 +213,11 @@ The system includes:
  User provides both a text description AND an audio clip (upload or microphone)
  Text and audio models each predict independently, in their own label space
  Predictions are blended via decision-level fusion, weighted by each
-  model's own real test accuracy (Text ~63% weight / Audio ~37% weight,
-  from the 89.2% / 52.8% accuracies in "Model Comparison" below - the
+  model's own real test accuracy (Text ~55% weight / Audio ~45% weight
+  with the v4/v2 models' 92.9% / 75.0% accuracies - the
   weighting shifts automatically whenever either model's measured
-  accuracy changes, since it's computed from `TEXT_MODEL_ACCURACY`/
-  `AUDIO_MODEL_ACCURACY` in `src/emotion_logic.py`, not hardcoded)
+  accuracy changes, since it's computed from whichever models are serving (see
+  `fusion_weights` in `src/emotion_logic.py`), not hardcoded)
  A genuinely neutral audio signal stays "neutral" in the blended result
   rather than being folded into another emotion
  Combined result plus each model's standalone prediction are both shown,
@@ -420,12 +510,14 @@ Change Icon).
 ## Train Text Model
 
 powershell
-python .\src\train_text_model.py
+python .\src\train_text_transformer.py   # v4 (production) - a CUDA GPU makes this ~2 minutes
+python .\src\train_text_model.py         # TF-IDF fallback model
 
 ## Train Audio Model
 
 powershell
-python .\src\train_audio_model.py
+python .\src\train_audio_wavlm.py        # v2 (production) - WavLM embeddings + logistic regression
+python .\src\train_audio_model.py        # classical fallback model
 
 
 # Model Comparison
@@ -466,7 +558,7 @@ philosophy for the general idea):
 
 | Model | Accuracy | F1 Score (macro) | Training Time (s) |
 |---|---|---|---|
-| Linear SVM (now in production, calibrated) | 89.5% | 84.2% | 1.78 |
+| Linear SVM (calibrated; production until Nov 2026, now the fallback) | 89.5% | 84.2% | 1.78 |
 | Logistic Regression (original baseline) | 86.9% | 80.7% | 0.72 |
 | Gradient Boosting | 86.0% | 82.8% | 43.96 |
 | Random Forest | 85.8% | 81.3% | 5.67 |
@@ -548,7 +640,7 @@ actor (see "Fairness & Generalisation Audit" below for why a plain
 
 | Model | Accuracy | F1 Score (macro) | Training Time (s) |
 |---|---|---|---|
-| Random Forest (now in production) | 52.8% | 50.8% | 7.23 |
+| Random Forest (production until Nov 2026, now the fallback) | 52.8% | 50.8% | 7.23 |
 | Gradient Boosting | 51.4% | 49.9% | 97.07 |
 | SVM (original baseline) | 49.7% | 48.6% | 39.62 |
 
@@ -881,7 +973,13 @@ Generated in `/results/`:
 
 # Performance Summary
 
-## Text Model
+Current production models (see "Model Upgrades"): **text** - DistilBERT v4,
+92.9% accuracy / 87.9% macro-F1 on the dair-ai test set, 68.7% on GoEmotions;
+**audio** - WavLM Base+ embeddings + logistic regression, 75.0% +- 2.3
+accuracy / 75.2% macro-F1 (5-fold, speaker-grouped). The sections below
+describe the fallback models.
+
+## Text Model (fallback)
 
  Linear SVM, calibrated via `CalibratedClassifierCV` for real confidence
   scores (chosen over the original Logistic Regression baseline via
@@ -892,7 +990,7 @@ Generated in `/results/`:
   `results/emotion_model.pkl.bak`; the pre-calibration Linear SVM is
   backed up separately as `results/emotion_model.pkl.uncalibrated.bak`
 
-## Audio Model
+## Audio Model (fallback)
 
  Random Forest Classifier (chosen over Gradient Boosting and the
   original SVM baseline via `src/compare_audio_models.py` - see "Model
@@ -938,9 +1036,10 @@ Spotify's own API.
 
 Potential future upgrades:
 
- ~~Deep learning models (CNN/LSTM/BERT)~~ text half attempted - real
-  results (89.0% accuracy, matching production, but didn't fix the
-  negation blind spot it targeted) in `ROADMAP.md` item 1
+ ~~Deep learning models (CNN/LSTM/BERT)~~ done - text v4 (DistilBERT +
+  GoEmotions) and audio v2 (WavLM) are in production; see "Model Upgrades".
+  Next steps: sarcasm (needs sarcasm-labelled data), and fine-tuning WavLM
+  end-to-end rather than freezing it
  Larger real-world datasets (audio half partly done - see "Audio Dataset")
  ~~Improved fairness and generalisation~~ leakage audit done - see
   "Fairness & Generalisation Audit" above

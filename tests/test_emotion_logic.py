@@ -509,3 +509,67 @@ def test_real_production_text_model_predicts_sensibly_on_a_clear_example():
     label, probs = el.predict_with_confidence(model, vec)
     assert sum(probs.values()) == pytest.approx(1.0, abs=1e-6)
     assert label == "anger"
+
+
+# --------------------------------------------------------------------------
+# Out-of-vocabulary flag, configurable fusion weights, explicit hedge
+# (text model v4 / audio model v2 changes - see README)
+# --------------------------------------------------------------------------
+
+def test_unknown_vocabulary_warning_fires_only_when_no_token_matched():
+    assert el.unknown_vocabulary_warning(0) == el.UNKNOWN_VOCABULARY_WARNING
+    assert el.unknown_vocabulary_warning(1) is None
+    assert el.unknown_vocabulary_warning(12) is None
+
+
+@pytest.mark.requires_production_models
+def test_gibberish_and_emoji_produce_an_all_zero_tfidf_row():
+    # The exact failure the warning exists for: these used to score a
+    # confident 57% Joy with no warning (README "Adversarial Input Exploration").
+    import joblib
+    from conftest import RESULTS_DIR
+
+    vectorizer_path = RESULTS_DIR / "vectorizer.pkl"
+    if not vectorizer_path.exists():
+        pytest.skip("results/vectorizer.pkl not found")
+    vectorizer = joblib.load(vectorizer_path)
+    for text in ["asdkjh qwpoeiru zxmcnb", "\U0001F602\U0001F602\U0001F602", "?!?!...", "estoy muy cansada hoy"]:
+        assert el.unknown_vocabulary_warning(vectorizer.transform([text]).nnz) is not None, text
+    assert el.unknown_vocabulary_warning(vectorizer.transform(["I feel happy today"]).nnz) is None
+
+
+def test_fusion_weights_follow_the_given_accuracies_and_sum_to_one():
+    text_w, audio_w = el.fusion_weights(0.9, 0.6)
+    assert text_w == pytest.approx(0.6)
+    assert audio_w == pytest.approx(0.4)
+    assert el.fusion_weights() == pytest.approx((el.TEXT_FUSION_WEIGHT, el.AUDIO_FUSION_WEIGHT))
+
+
+def test_fuse_predictions_uses_custom_accuracies_when_given():
+    fused = el.fuse_predictions({"joy": 1.0}, {"neutral": 1.0},
+                                el.TRANSFORMER_TEXT_MODEL_ACCURACY, el.WAVLM_AUDIO_MODEL_ACCURACY)
+    expected_text_w, expected_audio_w = el.fusion_weights(
+        el.TRANSFORMER_TEXT_MODEL_ACCURACY, el.WAVLM_AUDIO_MODEL_ACCURACY)
+    assert fused["joy"] == pytest.approx(expected_text_w)
+    assert fused["neutral"] == pytest.approx(expected_audio_w)
+    assert sum(fused.values()) == pytest.approx(1.0)
+
+
+def test_fuse_predictions_merges_a_text_neutral_class_with_audio_neutral():
+    # The v4 text model has its own neutral class; it must combine with the
+    # audio model's neutral, not sit beside it as a second key.
+    fused = el.fuse_predictions({"neutral": 1.0}, {"neutral": 1.0})
+    assert fused == {"neutral": pytest.approx(1.0)}
+
+
+def test_generate_conversational_reply_explicit_hedge_overrides_the_heuristic():
+    confident = {"joy": 0.95, "sadness": 0.05}
+    hedged = el.generate_conversational_reply("joy", confident, rng=np.random.default_rng(0), hedge=True)
+    assert any(hedged.startswith(p) for p in el.CHAT_LOW_CONFIDENCE_PREFIXES)
+
+    # Negated text would normally trigger a hedge - hedge=False (the
+    # transformer backend, which handles negation itself) suppresses it.
+    plain = el.generate_conversational_reply(
+        "sadness", {"sadness": 0.9, "joy": 0.1}, text="I am not happy at all",
+        rng=np.random.default_rng(0), hedge=False)
+    assert not any(plain.startswith(p) for p in el.CHAT_LOW_CONFIDENCE_PREFIXES)

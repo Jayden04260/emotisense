@@ -1,0 +1,46 @@
+{
+    "model": "microsoft/wavlm-base-plus (frozen) mean-pooled layer 6 + StandardScaler + LogisticRegression(C=0.1)",
+    "num_samples": 7034,
+    "num_actors": 115,
+    "classes": [
+        "angry",
+        "fear",
+        "happy",
+        "neutral",
+        "sad"
+    ],
+    "cv": "StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=42), grouped by actor; layer chosen per fold on training actors only",
+    "cv_accuracy_mean": 0.7503823552671113,
+    "cv_accuracy_std": 0.022500901904947544,
+    "cv_f1_macro_mean": 0.7516149950298199,
+    "cv_fold_accuracies": [
+        0.7752326413743736,
+        0.7748391708363116,
+        0.7364672364672364,
+        0.7169406719085061,
+        0.748432055749129
+    ],
+    "cv_fold_layers": [
+        6,
+        6,
+        7,
+        7,
+        6
+    ],
+    "final_layer": 6,
+    "layer_cv_scores_all_data": [
+        0.6340854192469947,
+        0.6555176866605781,
+        0.6820829547397492,
+        0.7029755947640955,
+        0.7265928885601843,
+        0.7393896959894732,
+        0.7523138828444841,
+        0.743801718049522,
+        0.7280563466864329,
+        0.7294811820440882,
+        0.7238901288040918,
+        0.715412847150799,
+        0.7027570477080771
+    ]
+}
